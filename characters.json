@@ -1,0 +1,200 @@
+{
+  "characters": [
+    {
+      "id": "howlu",
+      "name": "Poop Head",
+      "description": "Stonky fighter",
+      "stats": {
+        "strength": 660,
+        "attack": 660,
+        "magic_ability": 660,
+        "defense": -100,
+        "speed": 100,
+        "max_hp": 1000
+      },
+      "preset_attack": "water_blast",
+      "random_attack_pool": ["lightning_strike", "earth_shock", "wind_blade"],
+      "color": [0, 100, 255],
+      "sprite_file": "characters/howlu.png"
+    },
+    {
+      "id": "fire_log",
+      "name": "Calcifer",
+      "description": "High magic, low defense",
+      "stats": {
+        "strength": 30,
+        "attack": 35,
+        "magic_ability": 100,
+        "defense": 15,
+        "speed": 150,
+        "max_hp": 300
+      },
+      "preset_attack": "fireball",
+      "random_attack_pool": ["ice_shard", "grass_knot", "water_blast"],   
+      "color": [128, 0, 255],
+      "sprite_file": "characters/fire_log.png"
+    },
+    {
+      "id": "roast_radish",
+      "name": "Radish Head",
+      "description": "High defense, slower",
+      "stats": {
+        "strength": 80,
+        "attack": 80,
+        "magic_ability": 50,
+        "defense": 100,
+        "speed": 30,
+        "max_hp": 250
+      },
+      "preset_attack": "striking_hit",
+        "random_attack_pool": ["shield_bash", "round_sweep", "shield_wall"],
+      "color": [200, 200, 200],
+      "sprite_file": "characters/roast_radish.png"
+    },
+    {
+      "id": "sophie",
+      "name": "Saphie",
+      "description": "Well rounded",
+      "stats": {
+        "strength": 95,
+        "attack": 95,
+        "magic_ability": 95,
+        "defense": 95,
+        "speed": 95,
+        "max_hp": 95
+      },
+        "preset_attack": "golden_beam",
+        "random_attack_pool": ["shield_wall", "diamond_shard", "swirling_roots"],
+      "color": [139, 69, 19],
+      "sprite_file": "characters/rogue.png"
+    },
+    {
+      "id": "stinky",
+      "name": "Worst Character",
+      "description": "Balanced with maxed out loser-ness",
+      "stats": {
+        "strength": 1,
+        "attack": 1,
+        "magic_ability": 1,
+        "defense": 1,
+        "speed": 1,
+        "max_hp": 1000
+      },
+        "preset_attack": "stinky_fart",
+        "random_attack_pool": ["stinky_fart", "stinky_fart", "stinky_fart"],
+      "color": [255, 215, 0],
+      "sprite_file": "characters/stinky.png"
+    }
+  ],
+  "enemies": [
+    {
+      "id": "paella_servant",
+      "name": "Paella Servant",
+      "xp_reward": 20,
+      "stats_multiplier": 0.8,
+      "color": [200, 100, 100]
+    },
+    {
+      "id": "paella_monster",
+      "name": "Paella Monster",
+      "xp_reward": 100,
+      "stats_multiplier": 1.2,
+      "color": [220, 50, 50]
+    },
+    {
+      "id": "easy_boss",
+      "name": "Easy Boss",
+      "xp_reward": 500,
+      "stats_multiplier": 1.5,
+      "color": [200, 0, 200]
+    },
+    {
+      "id": "hard_boss",
+      "name": "Hard Boss",
+      "xp_reward": 1500,
+      "stats_multiplier": 2.0,
+      "color": [255, 100, 0]
+    },
+    {
+      "id": "boat_mom_easy",
+      "name": "Boat Mom",
+      "xp_reward": 700,
+      "stats_multiplier": 1.8,
+      "color": [100, 150, 255]
+    }
+  ],
+  "maps": [
+    {
+      "id": "starting_town",
+      "name": "Starting Town",
+      "layout": [
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "B......................................B",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      ],
+      "legend": {
+        ".": "grass",
+        "B": "building",
+        "P": "path",
+        "W": "water",
+        "T": "tree"
+      }
+    },
+    {
+      "id": "forest_path",
+      "name": "Forest Path",
+      "layout": [
+        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "T......................................T",
+        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      ],
+      "legend": {
+        ".": "grass",
+        "B": "building",
+        "P": "path",
+        "W": "water",
+        "T": "tree"
+      }
+    }
+  ]
+}

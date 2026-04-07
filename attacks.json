@@ -1,0 +1,126 @@
+{
+  "water_blast": {
+    "name": "Water Blast",
+    "damage_type": "magic",
+    "base_damage": 30,
+    "range": 3,
+    "effect": "knockback",
+    "cooldown": 1
+  },
+  "lightning_strike": {
+    "name": "Lightning Strike",
+    "damage_type": "magic",
+    "base_damage": 75,
+    "range": 5,
+    "effect": "shock",
+    "cooldown": 4
+  },
+  "earth_shock": {
+    "name": "Earth Shock",
+    "damage_type": "magic",
+    "base_damage": 45,
+    "range": 3,
+    "effect": "slow",
+    "cooldown": 2
+  },
+  "wind_blade": {
+    "name": "Wind Blade",
+    "damage_type": "magic",
+    "base_damage": 60,
+    "range": 2,
+    "effect": null,
+    "cooldown": 2
+
+  },
+  "fireball": {
+    "name": "Fireball",
+    "damage_type": "magic",
+    "base_damage": 40,
+    "range": 4,
+    "effect": "burn",
+    "cooldown": 2
+  },
+    "ice_shard": {
+    "name": "Ice Shard",
+    "damage_type": "magic",
+    "base_damage": 35,
+    "range": 4,
+    "effect": "freeze",
+    "cooldown": 3
+ },
+    "grass_knot": {
+    "name": "Grass Knot",
+    "damage_type": "magic",
+    "base_damage": 35,
+    "range": 3,
+    "effect": "slow",
+    "cooldown": 2
+
+  },
+    "striking_hit": {
+    "name": "Striking Hit",
+    "damage_type": "physical",
+    "base_damage": 50,
+    "range": 1,
+    "effect": "knockback",
+    "cooldown": 2
+  },
+    "shield_bash": {
+    "name": "Shield Bash",
+    "damage_type": "physical",
+    "base_damage": 65,
+    "range": 2,
+    "effect": "light_shield",
+    "cooldown": 1
+  },
+      "round_sweep": {
+    "name": "Round Sweep",
+    "damage_type": "physical",
+    "base_damage": 50,
+    "range": 1,
+    "effect": "knockback",
+    "cooldown": 1
+  },
+        "shield_wall": {
+        "name": "Shield Wall",
+        "damage_type": "physical",
+        "base_damage": 0,
+        "range": 0,
+        "effect": "heavy_shield",
+        "cooldown": 3
+    },
+        "golden_beam": {
+        "name": "Golden Beam",
+        "damage_type": "magic",
+        "base_damage": 95,
+        "range": 5,
+        "effect": "stun",
+        "cooldown": 4
+        },
+        "diamond_shard":{
+        "name": "Diamond Shard",
+        "damage_type": "magic",
+        "base_damage": 80,
+        "range": 4,
+        "effect": "pierce",
+        "cooldown": 3
+        },
+        "swirling_roots":{
+        "name": "Swirling Roots",
+        "damage_type": "magic",
+        "base_damage": 70,
+        "range": 3,
+        "effect": "knockback, slow",
+        "cooldown": 2
+        },
+        "stinky_fart":{
+        "name": "Stinky Fart",
+        "damage_type": "physical",
+        "base_damage": 0,
+        "range": 1,
+        "effect": "stinky",
+        "cooldown": 0
+        }
+
+  }
+
