@@ -1,0 +1,58 @@
+{
+  "small_potion": {
+    "name": "Small Potion",
+    "description": "A tiny bottle that restores a little health.",
+    "effect_type": "heal",
+    "value": 25,
+    "rarity": "common"
+  },
+  "large_potion": {
+    "name": "Large Potion",
+    "description": "A stronger potion for rough battles.",
+    "effect_type": "heal",
+    "value": 60,
+    "rarity": "uncommon"
+  },
+  "spark_tonic": {
+    "name": "Spark Tonic",
+    "description": "A fizzy drink that restores a little ability energy.",
+    "effect_type": "ability_charges",
+    "value": 1,
+    "rarity": "common"
+  },
+  "iron_bark": {
+    "name": "Iron Bark",
+    "description": "A hard strip of bark that can toughen defenses.",
+    "effect_type": "defense",
+    "value": 20,
+    "rarity": "uncommon"
+  },
+  "swift_feather": {
+    "name": "Swift Feather",
+    "description": "A feather that hums with speed.",
+    "effect_type": "speed",
+    "value": 15,
+    "rarity": "uncommon"
+  },
+  "ember_seed": {
+    "name": "Ember Seed",
+    "description": "A warm seed often found after fiery fights.",
+    "effect_type": "magic",
+    "value": 15,
+    "rarity": "common"
+  },
+  "lucky_potato": {
+    "name": "Lucky Potato",
+    "description": "A very fortunate potato. Nobody knows why.",
+    "effect_type": "xp",
+    "value": 50,
+    "rarity": "rare"
+  },
+  "mystery_gravy": {
+    "name": "Mystery Gravy",
+    "description": "Questionable, but strangely energizing.",
+    "effect_type": "heal",
+    "value": 40,
+    "rarity": "rare"
+  }
+}
