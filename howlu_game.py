@@ -1,4 +1,4 @@
-#use cd "/home/user/code and stuff" && "/home/user/code and stuff/.venv/bin/python" howlu_game.py
+#use cd "/home/user/howlu-potatoes" && "/home/user/code and stuff/.venv/bin/python" howlu_game.py
 #to run the game
 import pygame
 import random
@@ -20,7 +20,7 @@ pygame.init()
 
 # Constants
 SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+SCREEN_HEIGHT = 768
 FPS = 60
 TILE_SIZE = 32
 
@@ -102,7 +102,7 @@ class Character:
         self.attack_ids: List[str] = []
         self.cooldowns: Dict[str, int] = {}
         self.status_effects: Dict[str, int] = {}
-        self.shield_value = 0
+        self.defense_bonus = 0
         self.xp_reward = 0
         
     def set_attack_loadout(self, attack_ids: List[str]):
@@ -111,12 +111,11 @@ class Character:
     
     def take_damage(self, damage: float, ignore_defense: bool = False):
         """Apply damage with defense reduction"""
-        defense_reduction = 0 if ignore_defense else self.stats.defense / 10
+        defense_total = self.stats.defense + self.defense_bonus
+        defense_reduction = 0 if ignore_defense else defense_total / 10
         actual_damage = max(0, damage - defense_reduction)
-        if self.shield_value > 0:
-            blocked = min(actual_damage, self.shield_value)
-            actual_damage -= blocked
-            self.shield_value -= blocked
+        if self.has_status("wounded"):
+            actual_damage *= 1.5
         self.stats.current_hp -= actual_damage
         return actual_damage
     
@@ -351,6 +350,8 @@ class Game:
         self.player_target_x = self.player_grid_x
         self.player_target_y = self.player_grid_y
         self.player_move_speed = 2  # Pixels per frame when moving between tiles
+        self.show_reset_confirm = False
+        self.reset_confirm_choice = 1
     
     def _create_default_characters(self) -> List[Dict]:
         """Create default characters if JSON not found"""
@@ -520,7 +521,7 @@ class Game:
         
         self.enemy = Character(
             enemy_config["name"],
-            SCREEN_WIDTH - 200,
+            SCREEN_WIDTH - 320,
             SCREEN_HEIGHT // 2 - 24,
             stats,
             color
@@ -530,8 +531,10 @@ class Game:
         if not enemy_attacks:
             enemy_attacks = random.sample(list(attacks.keys()), k=min(4, len(attacks)))
         self.enemy.set_attack_loadout(enemy_attacks)
-        self.enemy.shield_value = 0
+        self.enemy.defense_bonus = 0
         self.messages = []
+        self.show_reset_confirm = False
+        self.reset_confirm_choice = 1
         self.selected_attack = 0
         self.player_velocity = [0, 0]
         self.enemy_velocity = [0, 0]
@@ -544,6 +547,15 @@ class Game:
                 self.running = False
             
             if event.type == pygame.KEYDOWN:
+                reset_shortcut = event.key == pygame.K_x and (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META))
+                if reset_shortcut and self.state != GameState.CHARACTER_SELECT:
+                    self.open_reset_confirmation()
+                    continue
+
+                if self.show_reset_confirm:
+                    self.handle_reset_confirmation_input(event)
+                    continue
+
                 if self.state == GameState.CHARACTER_SELECT: 
                     if event.key == pygame.K_UP:
                         self.selected_character_index = (self.selected_character_index - 1) % len(self.available_characters)
@@ -601,11 +613,33 @@ class Game:
             
             elif event.type == pygame.KEYUP:
                 # Stop movement
-                if self.state in [GameState.EXPLORE, GameState.BATTLE]:
+                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm:
                     if event.key in [pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s]:
                         self.player_velocity[1] = 0
                     elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d]:
                         self.player_velocity[0] = 0
+    def open_reset_confirmation(self):
+        self.show_reset_confirm = True
+        self.reset_confirm_choice = 1
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+
+    def handle_reset_confirmation_input(self, event):
+        if event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w]:
+            self.reset_confirm_choice = 0
+        elif event.key in [pygame.K_RIGHT, pygame.K_d, pygame.K_DOWN, pygame.K_s]:
+            self.reset_confirm_choice = 1
+        elif event.key in [pygame.K_ESCAPE, pygame.K_n]:
+            self.show_reset_confirm = False
+            self.reset_confirm_choice = 1
+        elif event.key in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_y]:
+            if self.reset_confirm_choice == 0:
+                self.show_reset_confirm = False
+                self.reset_game()
+            else:
+                self.show_reset_confirm = False
+                self.reset_confirm_choice = 1
+
     def player_recover(self):
         """High-risk recover: 65% chance to gain 2 AC, but skip turn"""
         if not self._begin_turn(self.player, self.enemy, is_player_turn=True):
@@ -635,7 +669,7 @@ class Game:
     def _message(self, text: str, duration: int = 120):
         self.messages.append(GameMessage(text, duration))
 
-    def _apply_knockback(self, attacker: Character, target: Character, distance_pixels: int = TILE_SIZE):
+    def _apply_knockback(self, attacker: Character, target: Character, distance_pixels: int = TILE_SIZE * 4):
         dx = (target.x + target.width / 2) - (attacker.x + attacker.width / 2)
         dy = (target.y + target.height / 2) - (attacker.y + attacker.height / 2)
         length = math.hypot(dx, dy)
@@ -662,10 +696,14 @@ class Game:
         attack_pool = available_attacks if available_attacks else self.enemy.attack_ids
         if not attack_pool:
             return 2.0
-        return max(1.0, max(self._get_attack_range(self.enemy, attack_id) for attack_id in attack_pool) - 0.35)
+        shortest_range = min(self._get_attack_range(self.enemy, attack_id) for attack_id in attack_pool)
+        return max(1.25, shortest_range - 0.1)
 
     def _update_enemy_movement(self):
         if not self.enemy or not self.player or not self.enemy.is_alive() or not self.player.is_alive():
+            return
+        if self.enemy.has_status("freeze"):
+            self.enemy_velocity = [0, 0]
             return
         
         enemy_center_x = self.enemy.x + self.enemy.width / 2
@@ -694,7 +732,7 @@ class Game:
         self.enemy_velocity[1] = move_y
         self.enemy.x += self.enemy_velocity[0]
         self.enemy.y += self.enemy_velocity[1]
-        self.enemy.x = max(SCREEN_WIDTH // 2 + 10, min(self.enemy.x, SCREEN_WIDTH - self.enemy.width - 50))
+        self.enemy.x = max(SCREEN_WIDTH * 0.55, min(self.enemy.x, SCREEN_WIDTH - self.enemy.width - 70))
         self.enemy.y = max(100, min(self.enemy.y, SCREEN_HEIGHT - 150))
 
     def _apply_attack_effects(self, attacker: Character, target: Character, attack_data: Dict):
@@ -702,28 +740,34 @@ class Game:
             if effect == "knockback":
                 self._apply_knockback(attacker, target)
                 self._message(f"{target.name} was knocked back!", 120)
-            elif effect in {"stun", "shock", "freeze"}:
+            elif effect in {"stun", "shock"}:
                 target.apply_status(effect, 1)
                 self._message(f"{target.name} is afflicted with {effect}!", 120)
+            elif effect == "freeze":
+                target.apply_status("freeze", 1)
+                self._message(f"{target.name} is frozen solid!", 120)
             elif effect == "slow":
                 target.apply_status("slow", 2)
                 self._message(f"{target.name} is slowed!", 120)
             elif effect == "burn":
-                target.apply_status("burn", 3)
+                target.apply_status("burn", 4)
                 self._message(f"{target.name} is burning!", 120)
+            elif effect == "wounded":
+                target.apply_status("wounded", 3)
+                self._message(f"{target.name} is wounded!", 120)
             elif effect == "light_shield":
-                attacker.shield_value += 15
-                self._message(f"{attacker.name} gains a light shield!", 120)
+                attacker.defense_bonus += 50
+                self._message(f"{attacker.name} gains 50 defense!", 120)
             elif effect == "heavy_shield":
-                attacker.shield_value += 30
-                self._message(f"{attacker.name} braces behind a heavy shield!", 120)
+                attacker.defense_bonus += 200
+                self._message(f"{attacker.name} gains 200 defense!", 120)
             elif effect == "stinky":
                 target.apply_status("stinky", 2)
                 self._message(f"{target.name} is overwhelmed by the smell!", 120)
 
     def _begin_turn(self, actor: Character, opponent: Character, is_player_turn: bool) -> bool:
         if actor.has_status("burn"):
-            burn_damage = actor.take_damage(10, ignore_defense=True)
+            burn_damage = actor.take_damage(6, ignore_defense=True)
             self._message(f"{actor.name} takes {burn_damage:.0f} burn damage!", 120)
             if not actor.is_alive():
                 self.state = GameState.PLAYER_LOST if is_player_turn else GameState.PLAYER_WON
@@ -757,8 +801,10 @@ class Game:
             self._message(f"{attack_data['name']} is on cooldown for {attacker.cooldowns[attack_id]} more turn(s).", 150)
             return False
         
-        distance = self._distance_in_tiles(attacker, target)
-        if distance > attack_data.get("range", 1):
+        effect_names = get_attack_effects(attack_data)
+        is_self_buff = attack_data.get("base_damage", 0) == 0 and any(effect in {"light_shield", "heavy_shield"} for effect in effect_names)
+        distance = 0 if is_self_buff else self._distance_in_tiles(attacker, target)
+        if not is_self_buff and distance > attack_data.get("range", 1):
             self._message(
                 f"{attack_data['name']} is out of range ({distance:.1f}/{attack_data.get('range', 1)} tiles).",
                 150
@@ -771,11 +817,16 @@ class Game:
             return True
         
         damage = calculate_attack_damage(attacker, attack_data)
-        ignore_defense = "pierce" in get_attack_effects(attack_data)
-        actual_damage = target.take_damage(damage, ignore_defense=ignore_defense)
+        if attacker.has_status("slow"):
+            damage *= 0.75
+        ignore_defense = "pierce" in effect_names
+        actual_damage = 0 if is_self_buff else target.take_damage(damage, ignore_defense=ignore_defense)
         attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
         
-        self._message(f"{attacker.name} used {attack_data['name']} for {actual_damage:.0f} damage!", 120)
+        if is_self_buff:
+            self._message(f"{attacker.name} used {attack_data['name']}!", 120)
+        else:
+            self._message(f"{attacker.name} used {attack_data['name']} for {actual_damage:.0f} damage!", 120)
         self._apply_attack_effects(attacker, target, attack_data)
         return True
 
@@ -941,13 +992,15 @@ class Game:
         current_move_speed = self.move_speed
         if self.player.has_status("slow"):
             current_move_speed = max(2, self.move_speed // 2)
+        if self.player.has_status("freeze"):
+            current_move_speed = 0
         
         # Apply velocity to player position
         self.player.x += math.copysign(min(abs(self.player_velocity[0]), current_move_speed), self.player_velocity[0]) if self.player_velocity[0] else 0
         self.player.y += math.copysign(min(abs(self.player_velocity[1]), current_move_speed), self.player_velocity[1]) if self.player_velocity[1] else 0
         
         # Clamp player to screen bounds (battle arena)
-        self.player.x = max(50, min(self.player.x, SCREEN_WIDTH // 2 - self.player.width - 10))
+        self.player.x = max(50, min(self.player.x, SCREEN_WIDTH * 0.62 - self.player.width))
         self.player.y = max(0, min(self.player.y, SCREEN_HEIGHT - 150))
         
         self._update_enemy_movement()
@@ -970,6 +1023,9 @@ class Game:
         elif self.state == GameState.PLAYER_LOST:
             self.draw_battle()
             self.draw_defeat_screen()
+
+        if self.show_reset_confirm:
+            self.draw_reset_confirmation()
     
     def draw_character_select(self):
         """Draw character selection screen"""
@@ -1113,10 +1169,12 @@ class Game:
         
         # Draw character names and stats
         player_name = self.font_small.render(f"{self.player.name} (Lv.{self.player.level})", True, BLUE)
-        self.screen.blit(player_name, (self.player.x - player_name.get_width() // 2 + self.player.width // 2, self.player.y + self.player.height + 5))
+        player_name_x = max(20, min(self.player.x - player_name.get_width() // 2 + self.player.width // 2, SCREEN_WIDTH - player_name.get_width() - 20))
+        self.screen.blit(player_name, (player_name_x, self.player.y + self.player.height + 5))
         
         enemy_name = self.font_small.render(f"{self.enemy.name}", True, RED)
-        self.screen.blit(enemy_name, (self.enemy.x - enemy_name.get_width() // 2 + self.enemy.width // 2, self.enemy.y + self.enemy.height + 5))
+        enemy_name_x = max(20, min(self.enemy.x - enemy_name.get_width() // 2 + self.enemy.width // 2, SCREEN_WIDTH - enemy_name.get_width() - 20))
+        self.screen.blit(enemy_name, (enemy_name_x, self.enemy.y + self.enemy.height + 5))
         
         # Draw HP values
         player_hp = self.font_small.render(f"HP: {self.player.stats.current_hp:.0f}/{self.player.stats.max_hp:.0f}", True, WHITE)
@@ -1139,13 +1197,18 @@ class Game:
         if self.enemy.status_effects:
             enemy_status = ", ".join(f"{name}:{turns}" for name, turns in self.enemy.status_effects.items())
             enemy_status_text = self.font_small.render(f"Enemy: {enemy_status}", True, WHITE)
-            self.screen.blit(enemy_status_text, (SCREEN_WIDTH - enemy_hp.get_width() - 240, 50))
+            enemy_status_x = max(20, SCREEN_WIDTH - enemy_status_text.get_width() - 20)
+            self.screen.blit(enemy_status_text, (enemy_status_x, 50))
         
         # Draw attack options with controls
-        attack_y = SCREEN_HEIGHT - 120
+        attack_y = SCREEN_HEIGHT - 150
         attack_label = self.font_small.render("Attack (1-5):", True, WHITE)
         self.screen.blit(attack_label, (20, attack_y))
         
+        attack_box_width = 300
+        attack_box_height = 28
+        attack_gap_x = 16
+        attack_gap_y = 10
         for i, attack_id in enumerate(self.player.attack_ids[:5]):
             selected = i == self.selected_attack
             color = YELLOW if selected else WHITE
@@ -1155,12 +1218,16 @@ class Game:
             attack_name = attack_data.get("name", attack_id)
             attack_range = attack_data.get("range", 0)
             attack_text = self.font_small.render(f"[{i+1}] {attack_name} R:{attack_range}{cooldown_label}", True, color)
-            x_offset = 20 + (i * 240)
-            self.screen.blit(attack_text, (x_offset, attack_y + 30))
+            column = i % 2
+            row = i // 2
+            x_offset = 20 + column * (attack_box_width + attack_gap_x)
+            y_offset = attack_y + 30 + row * (attack_box_height + attack_gap_y)
+            self.screen.blit(attack_text, (x_offset, y_offset))
         
         # Draw movement instructions
-        move_text = self.font_small.render("WASD/Arrows move, SPACE attacks, R recovers AC", True, GRAY)
-        self.screen.blit(move_text, (SCREEN_WIDTH // 2 - move_text.get_width() // 2, SCREEN_HEIGHT - 35))
+        move_text = self.font_small.render("WASD move, SPACE attack, R recover AC", True, GRAY)
+        move_x = max(20, SCREEN_WIDTH - move_text.get_width() - 20)
+        self.screen.blit(move_text, (move_x, SCREEN_HEIGHT - 35))
         
         # Draw messages
         msg_y = SCREEN_HEIGHT // 2 - 200
@@ -1168,6 +1235,37 @@ class Game:
             msg.draw(self.screen, self.font_small, msg_y)
             msg_y += 30
     
+    def draw_reset_confirmation(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 520
+        box_height = 220
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+        pygame.draw.rect(self.screen, (35, 35, 55), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+
+        title = self.font_large.render("Return To Character Select?", True, YELLOW)
+        title_x = SCREEN_WIDTH // 2 - title.get_width() // 2
+        self.screen.blit(title, (title_x, box_y + 30))
+
+        body = self.font_small.render("Current battle/exploration progress will be lost.", True, WHITE)
+        body_x = SCREEN_WIDTH // 2 - body.get_width() // 2
+        self.screen.blit(body, (body_x, box_y + 85))
+
+        yes_color = YELLOW if self.reset_confirm_choice == 0 else WHITE
+        no_color = YELLOW if self.reset_confirm_choice == 1 else WHITE
+        yes_text = self.font_large.render("[ Yes ]", True, yes_color)
+        no_text = self.font_large.render("[ No ]", True, no_color)
+        self.screen.blit(yes_text, (box_x + 110, box_y + 145))
+        self.screen.blit(no_text, (box_x + box_width - no_text.get_width() - 110, box_y + 145))
+
+        hint = self.font_small.render("Use A/D or arrows, then Enter or Space", True, GRAY)
+        hint_x = SCREEN_WIDTH // 2 - hint.get_width() // 2
+        self.screen.blit(hint, (hint_x, box_y + 185))
+
     def draw_victory_screen(self):
         victory_text = self.font_large.render("VICTORY!", True, GREEN)
         self.screen.blit(victory_text, (SCREEN_WIDTH // 2 - victory_text.get_width() // 2, 100))
@@ -1190,6 +1288,8 @@ class Game:
         self.player = None
         self.enemy = None
         self.messages = []
+        self.show_reset_confirm = False
+        self.reset_confirm_choice = 1
     
     def run(self):
         while self.running:
