@@ -5,7 +5,8 @@
     "base_damage": 30,
     "range": 6,
     "effect": "knockback",
-    "cooldown": 1
+    "cooldown": 1,
+    "element": "water"
   },
   "lightning_strike": {
     "name": "Lightning Strike",
@@ -13,7 +14,8 @@
     "base_damage": 75,
     "range": 10,
     "effect": "shock",
-    "cooldown": 4
+    "cooldown": 4,
+    "element": "lightning"
   },
   "earth_shock": {
     "name": "Earth Shock",
@@ -21,16 +23,17 @@
     "base_damage": 45,
     "range": 6,
     "effect": "slow",
-    "cooldown": 2
+    "cooldown": 2,
+    "element": "earth"
   },
   "wind_blade": {
     "name": "Wind Blade",
     "damage_type": "magic",
     "base_damage": 60,
     "range": 4,
-    "effect": null,
-    "cooldown": 2
-
+    "effect": "wounded",
+    "cooldown": 2,
+    "element": "wind"
   },
   "fireball": {
     "name": "Fireball",
@@ -38,89 +41,97 @@
     "base_damage": 40,
     "range": 8,
     "effect": "burn",
-    "cooldown": 2
+    "cooldown": 2,
+    "element": "fire"
   },
-    "ice_shard": {
+  "ice_shard": {
     "name": "Ice Shard",
     "damage_type": "magic",
     "base_damage": 35,
     "range": 8,
     "effect": "freeze",
-    "cooldown": 3
- },
-    "grass_knot": {
+    "cooldown": 3,
+    "element": "ice"
+  },
+  "grass_knot": {
     "name": "Grass Knot",
     "damage_type": "magic",
     "base_damage": 35,
     "range": 6,
     "effect": "slow",
-    "cooldown": 2
-
+    "cooldown": 2,
+    "element": "nature"
   },
-    "striking_hit": {
+  "striking_hit": {
     "name": "Striking Hit",
     "damage_type": "physical",
     "base_damage": 50,
-    "range":5,
+    "range": 5,
     "effect": "knockback",
-    "cooldown": 2
+    "cooldown": 2,
+    "element": "physical"
   },
-    "shield_bash": {
+  "shield_bash": {
     "name": "Shield Bash",
     "damage_type": "physical",
     "base_damage": 65,
     "range": 5,
     "effect": "light_shield",
-    "cooldown": 1
+    "cooldown": 1,
+    "element": "metal"
   },
-      "round_sweep": {
+  "round_sweep": {
     "name": "Round Sweep",
     "damage_type": "physical",
     "base_damage": 50,
     "range": 5,
     "effect": "knockback",
-    "cooldown": 1
+    "cooldown": 1,
+    "element": "physical"
   },
-        "shield_wall": {
-        "name": "Shield Wall",
-        "damage_type": "physical",
-        "base_damage": 0,
-        "range": 0,
-        "effect": "heavy_shield",
-        "cooldown": 3
-    },
-        "golden_beam": {
-        "name": "Golden Beam",
-        "damage_type": "magic",
-        "base_damage": 95,
-        "range": 10,
-        "effect": "stun",
-        "cooldown": 4
-        },
-        "diamond_shard":{
-        "name": "Diamond Shard",
-        "damage_type": "magic",
-        "base_damage": 80,
-        "range": 8,
-        "effect": "pierce",
-        "cooldown": 3
-        },
-        "swirling_roots":{
-        "name": "Swirling Roots",
-        "damage_type": "magic",
-        "base_damage": 70,
-        "range": 6,
-        "effect": "knockback, slow",
-        "cooldown": 2
-        },
-        "stinky_fart":{
-        "name": "Stinky Fart",
-        "damage_type": "physical",
-        "base_damage": 0,
-        "range": 100,
-        "effect": "stinky",
-        "cooldown": 0
-        }
-
+  "shield_wall": {
+    "name": "Shield Wall",
+    "damage_type": "physical",
+    "base_damage": 0,
+    "range": 0,
+    "effect": "heavy_shield",
+    "cooldown": 3,
+    "element": "metal"
+  },
+  "golden_beam": {
+    "name": "Golden Beam",
+    "damage_type": "magic",
+    "base_damage": 95,
+    "range": 10,
+    "effect": "stun",
+    "cooldown": 4,
+    "element": "crystal"
+  },
+  "diamond_shard": {
+    "name": "Diamond Shard",
+    "damage_type": "magic",
+    "base_damage": 80,
+    "range": 8,
+    "effect": "pierce",
+    "cooldown": 3,
+    "element": "crystal"
+  },
+  "swirling_roots": {
+    "name": "Swirling Roots",
+    "damage_type": "magic",
+    "base_damage": 70,
+    "range": 6,
+    "effect": "knockback, slow",
+    "cooldown": 2,
+    "element": "nature"
+  },
+  "stinky_fart": {
+    "name": "Stinky Fart",
+    "damage_type": "physical",
+    "base_damage": 0,
+    "range": 100,
+    "effect": "stinky",
+    "cooldown": 0,
+    "element": "stink"
   }
-
+}

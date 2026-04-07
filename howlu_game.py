@@ -11,9 +11,12 @@ from typing import Optional, List, Dict
 
 
 
-# Load attacks from JSON file
+# Load attacks and items from JSON files
 with open("attacks.json", "r") as f:
     attacks = json.load(f)
+
+with open("items.json", "r") as f:
+    items = json.load(f)
     
 # Initialize Pygame
 pygame.init()
@@ -60,6 +63,27 @@ PURPLE = (128, 0, 128)
 GRAY = (128, 128, 128)
 DARK_RED = (139, 0, 0)
 
+ITEM_RARITY_ORDER = ["common", "uncommon", "rare", "epic", "refined", "maxed-potato"]
+
+ITEM_RARITY_DROP_RATES = {
+    "uncommon": 25.0,
+    "rare": 10.0,
+    "epic": 5.0,
+    "refined": 2.5,
+    "maxed-potato": 0.1,
+}
+ITEM_RARITY_DROP_RATES["common"] = max(0.0, 100.0 - sum(ITEM_RARITY_DROP_RATES.values()))
+
+ITEM_RARITY_COLORS = {
+    "common": WHITE,
+    "uncommon": (0, 200, 0),
+    "rare": BLUE,
+    "epic": (64, 224, 208),
+    "refined": (255, 215, 0),
+    "maxed-potato": RED,
+}
+
+
 class AttackType(Enum):
     STRENGTH = "Strength"
     ATTACK = "Attack"
@@ -103,6 +127,9 @@ class Character:
         self.cooldowns: Dict[str, int] = {}
         self.status_effects: Dict[str, int] = {}
         self.defense_bonus = 0
+        self.dodge_chance = 0.0
+        self.fire_shield_turns = 0
+        self.fire_shield_damage = 8
         self.xp_reward = 0
         
     def set_attack_loadout(self, attack_ids: List[str]):
@@ -111,13 +138,15 @@ class Character:
     
     def take_damage(self, damage: float, ignore_defense: bool = False):
         """Apply damage with defense reduction"""
+        if damage > 0 and random.random() < self.dodge_chance:
+            return 0, True
         defense_total = self.stats.defense + self.defense_bonus
         defense_reduction = 0 if ignore_defense else defense_total / 10
         actual_damage = max(0, damage - defense_reduction)
         if self.has_status("wounded"):
             actual_damage *= 1.5
-        self.stats.current_hp -= actual_damage
-        return actual_damage
+        self.stats.current_hp = max(0, self.stats.current_hp - actual_damage)
+        return actual_damage, False
     
     def gain_experience(self, amount: int):
         """Gain experience and level up if needed"""
@@ -253,6 +282,11 @@ def get_attack_effects(attack_data: Dict) -> List[str]:
         return []
     return [effect.strip() for effect in effect_text.split(",") if effect.strip()]
 
+
+def get_item_rarity_color(item_data: Dict) -> tuple:
+    rarity = str(item_data.get("rarity", "common")).strip().lower()
+    return ITEM_RARITY_COLORS.get(rarity, WHITE)
+
 class GameMessage:
     def __init__(self, text: str, duration: int = 120):
         self.text = text
@@ -330,6 +364,15 @@ class Game:
         self.selected_attack = 0
         self.last_damage_dealt = 0
         self.last_damage_taken = 0
+        self.inventory: Dict[str, int] = {}
+        self.equipment_slots: Dict[str, Optional[str]] = {
+            "helmet": None,
+            "armor": None,
+            "accessory": None,
+            "relic": None,
+        }
+        self.show_inventory = False
+        self.inventory_selection = 0
         
         # Movement variables
         self.player_velocity = [0, 0]  # [vx, vy]
@@ -415,8 +458,14 @@ class Game:
         preset_attack = character_data.get("preset_attack")
         if preset_attack:
             attack_ids.append(preset_attack)
-        attack_ids.extend(character_data.get("random_attack_pool", []))
-        self.player.set_attack_loadout(attack_ids[:5])
+
+        random_attack_pool = character_data.get("random_attack_pool", [])
+        if random_attack_pool:
+            attack_ids.append(random.choice(random_attack_pool))
+
+        # Keep only unique starting moves while preserving order.
+        unique_attack_ids = list(dict.fromkeys(attack_ids))
+        self.player.set_attack_loadout(unique_attack_ids[:2])
     
     def _load_current_map(self) -> List[List[int]]:
         """Load the current map from JSON data"""
@@ -527,6 +576,8 @@ class Game:
             color
         )
         self.enemy.xp_reward = enemy_config.get("xp_reward", 100)
+        self.enemy.drop_pool = enemy_config.get("drop_pool", list(items.keys()))
+        self.enemy.drop_count_range = enemy_config.get("drop_count_range", [1, 2])
         enemy_attacks = enemy_config.get("attack_pool")
         if not enemy_attacks:
             enemy_attacks = random.sample(list(attacks.keys()), k=min(4, len(attacks)))
@@ -535,11 +586,14 @@ class Game:
         self.messages = []
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
+        self.show_inventory = False
+        self.inventory_selection = 0
         self.selected_attack = 0
         self.player_velocity = [0, 0]
         self.enemy_velocity = [0, 0]
         self.player.x = 120
         self.player.y = SCREEN_HEIGHT // 2 - 24
+        self._start_battle_turn_order()
     
     def handle_events(self):
         for event in pygame.event.get():
@@ -556,6 +610,10 @@ class Game:
                     self.handle_reset_confirmation_input(event)
                     continue
 
+                if self.show_inventory:
+                    self._handle_inventory_input(event)
+                    continue
+
                 if self.state == GameState.CHARACTER_SELECT: 
                     if event.key == pygame.K_UP:
                         self.selected_character_index = (self.selected_character_index - 1) % len(self.available_characters)
@@ -570,7 +628,9 @@ class Game:
                 
                 elif self.state == GameState.EXPLORE:
                     # Handle movement input
-                    if event.key == pygame.K_UP or event.key == pygame.K_w:
+                    if event.key == pygame.K_i:
+                        self._open_inventory()
+                    elif event.key == pygame.K_UP or event.key == pygame.K_w:
                         self.player_velocity[1] = -self.move_speed
                     elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
                         self.player_velocity[1] = self.move_speed
@@ -581,7 +641,9 @@ class Game:
                 
                 elif self.state == GameState.BATTLE:
                     # Movement in battle
-                    if event.key == pygame.K_UP or event.key == pygame.K_w:
+                    if event.key == pygame.K_i:
+                        self._open_inventory()
+                    elif event.key == pygame.K_UP or event.key == pygame.K_w:
                         self.player_velocity[1] = -self.move_speed
                     elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
                         self.player_velocity[1] = self.move_speed
@@ -613,7 +675,7 @@ class Game:
             
             elif event.type == pygame.KEYUP:
                 # Stop movement
-                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm:
+                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_inventory:
                     if event.key in [pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s]:
                         self.player_velocity[1] = 0
                     elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d]:
@@ -668,6 +730,276 @@ class Game:
 
     def _message(self, text: str, duration: int = 120):
         self.messages.append(GameMessage(text, duration))
+
+    def _inventory_item_ids(self) -> List[str]:
+        return sorted([item_id for item_id, amount in self.inventory.items() if amount > 0], key=lambda item_id: items[item_id]["name"])
+
+    def _equipment_slot_for_item(self, item_id: str) -> Optional[str]:
+        effect_type = items.get(item_id, {}).get("effect_type")
+        return {
+            "defense": "armor",
+            "speed": "accessory",
+            "magic": "relic",
+            "helmet_defense": "helmet",
+            "helmet_max_ac": "helmet",
+            "armor_defense": "armor",
+            "armor_max_ac": "armor",
+            "armor_dodge": "armor",
+        }.get(effect_type)
+
+    def _apply_equipment_bonus(self, item_id: str, multiplier: int):
+        if not self.player or item_id not in items:
+            return
+        item_data = items[item_id]
+        effect_type = item_data.get("effect_type")
+        value = item_data.get("value", 0)
+        if effect_type in {"defense", "helmet_defense", "armor_defense"}:
+            self.player.stats.defense += value * multiplier
+        elif effect_type == "speed":
+            self.player.stats.speed += value * multiplier
+        elif effect_type == "magic":
+            self.player.stats.magic_ability += value * multiplier
+        elif effect_type in {"helmet_max_ac", "armor_max_ac"}:
+            delta = int(value) * multiplier
+            self.player.max_ability_charges = max(0, self.player.max_ability_charges + delta)
+            if delta > 0:
+                self.player.ability_charges = min(self.player.max_ability_charges, self.player.ability_charges + delta)
+            else:
+                self.player.ability_charges = min(self.player.ability_charges, self.player.max_ability_charges)
+        elif effect_type == "armor_dodge":
+            self.player.dodge_chance = max(0.0, min(0.95, self.player.dodge_chance + (float(value) * multiplier)))
+
+    def _equip_item(self, item_id: str) -> bool:
+        slot_name = self._equipment_slot_for_item(item_id)
+        if not slot_name:
+            self._message(f"{items[item_id]['name']} cannot be equipped.", 150)
+            return False
+        if self.inventory.get(item_id, 0) <= 0:
+            return False
+
+        previous_item = self.equipment_slots.get(slot_name)
+        if previous_item == item_id:
+            self._message(f"{items[item_id]['name']} is already equipped.", 150)
+            return False
+
+        if previous_item:
+            self._apply_equipment_bonus(previous_item, -1)
+            self.inventory[previous_item] = self.inventory.get(previous_item, 0) + 1
+
+        self.inventory[item_id] -= 1
+        if self.inventory[item_id] <= 0:
+            del self.inventory[item_id]
+
+        self.equipment_slots[slot_name] = item_id
+        self._apply_equipment_bonus(item_id, 1)
+        self._message(f"Equipped {items[item_id]['name']} to {slot_name}.", 180)
+        return True
+
+    def _use_consumable_item(self, item_id: str) -> bool:
+        if not self.player or self.inventory.get(item_id, 0) <= 0:
+            return False
+        item_data = items.get(item_id, {})
+        effect_type = item_data.get("effect_type")
+        value = item_data.get("value", 0)
+        used = False
+
+        if effect_type == "heal":
+            old_hp = self.player.stats.current_hp
+            self.player.stats.current_hp = min(self.player.stats.max_hp, self.player.stats.current_hp + value)
+            healed = self.player.stats.current_hp - old_hp
+            self._message(f"Used {item_data['name']}! Restored {healed:.0f} HP.", 180)
+            used = healed > 0
+        elif effect_type == "ability_charges":
+            old_charges = self.player.ability_charges
+            self.player.ability_charges = min(self.player.max_ability_charges, self.player.ability_charges + value)
+            gained = self.player.ability_charges - old_charges
+            self._message(f"Used {item_data['name']}! Gained {gained} AC.", 180)
+            used = gained > 0
+        elif effect_type == "xp":
+            self.player.gain_experience(value)
+            self._message(f"Used {item_data['name']}! Gained {value} XP.", 180)
+            used = True
+        elif effect_type == "fire_shield":
+            self.player.fire_shield_turns = max(self.player.fire_shield_turns, int(value))
+            self.player.fire_shield_damage = 8
+            self._message(f"Used {item_data['name']}! A burning shield surrounds you.", 180)
+            used = True
+        else:
+            self._message(f"{item_data.get('name', item_id)} cannot be used right now.", 150)
+            return False
+
+        if not used:
+            self._message(f"{item_data['name']} had no effect.", 150)
+            return False
+
+        self.inventory[item_id] -= 1
+        if self.inventory[item_id] <= 0:
+            del self.inventory[item_id]
+        return True
+
+    def _open_inventory(self):
+        self.show_inventory = True
+        self.inventory_selection = 0
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+
+    def _close_inventory(self):
+        self.show_inventory = False
+        self.inventory_selection = 0
+
+    def _handle_inventory_input(self, event):
+        inventory_ids = self._inventory_item_ids()
+        if event.key in [pygame.K_ESCAPE, pygame.K_i]:
+            self._close_inventory()
+            return
+        if not inventory_ids:
+            return
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.inventory_selection = (self.inventory_selection - 1) % len(inventory_ids)
+            return
+        if event.key in [pygame.K_DOWN, pygame.K_s]:
+            self.inventory_selection = (self.inventory_selection + 1) % len(inventory_ids)
+            return
+        if event.key not in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_e]:
+            return
+
+        selected_item = inventory_ids[self.inventory_selection]
+        slot_name = self._equipment_slot_for_item(selected_item)
+        if slot_name:
+            item_used = self._equip_item(selected_item)
+        else:
+            item_used = self._use_consumable_item(selected_item)
+
+        if not item_used:
+            return
+
+        if self.state == GameState.BATTLE:
+            self._close_inventory()
+            self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
+        else:
+            updated_ids = self._inventory_item_ids()
+            if updated_ids:
+                self.inventory_selection = min(self.inventory_selection, len(updated_ids) - 1)
+            else:
+                self.inventory_selection = 0
+
+    def _draw_inventory_overlay(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 185))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 860
+        box_height = 520
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+        pygame.draw.rect(self.screen, (30, 32, 48), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+
+        title = self.font_large.render("Inventory", True, YELLOW)
+        self.screen.blit(title, (box_x + 24, box_y + 20))
+
+        inventory_ids = self._inventory_item_ids()
+        left_x = box_x + 24
+        start_y = box_y + 70
+        row_height = 34
+        if inventory_ids:
+            for i, item_id in enumerate(inventory_ids[:10]):
+                item_data = items[item_id]
+                rarity_color = get_item_rarity_color(item_data)
+                color = rarity_color if i == self.inventory_selection else rarity_color
+                slot_name = self._equipment_slot_for_item(item_id)
+                suffix = f" [{slot_name}]" if slot_name else ""
+                prefix = ">> " if i == self.inventory_selection else ""
+                item_text = self.font_small.render(f"{prefix}{item_data['name']} x{self.inventory[item_id]}{suffix}", True, color)
+                self.screen.blit(item_text, (left_x, start_y + i * row_height))
+
+            selected_item = inventory_ids[self.inventory_selection]
+            selected_data = items[selected_item]
+            selected_color = get_item_rarity_color(selected_data)
+            detail_x = box_x + 430
+            detail_title = self.font_small.render(selected_data['name'], True, selected_color)
+            self.screen.blit(detail_title, (detail_x, start_y))
+            detail_desc = self.font_small.render(selected_data.get('description', ''), True, WHITE)
+            self.screen.blit(detail_desc, (detail_x, start_y + 36))
+            detail_type = self.font_small.render(f"Type: {selected_data.get('effect_type', 'unknown')}", True, WHITE)
+            self.screen.blit(detail_type, (detail_x, start_y + 72))
+            detail_value = self.font_small.render(f"Value: {selected_data.get('value', 0)}", True, WHITE)
+            self.screen.blit(detail_value, (detail_x, start_y + 102))
+            detail_rarity = self.font_small.render(f"Tier: {selected_data.get('rarity', 'common')}", True, selected_color)
+            self.screen.blit(detail_rarity, (detail_x, start_y + 132))
+        else:
+            empty_text = self.font_small.render("No items in inventory.", True, WHITE)
+            self.screen.blit(empty_text, (left_x, start_y))
+
+        equipment_y = box_y + box_height - 150
+        equipment_title = self.font_small.render("Equipped", True, YELLOW)
+        self.screen.blit(equipment_title, (left_x, equipment_y))
+        slot_rows = [
+            f"Helmet: {items[self.equipment_slots['helmet']]['name'] if self.equipment_slots['helmet'] else 'Empty'}",
+            f"Armor: {items[self.equipment_slots['armor']]['name'] if self.equipment_slots['armor'] else 'Empty'}",
+            f"Accessory: {items[self.equipment_slots['accessory']]['name'] if self.equipment_slots['accessory'] else 'Empty'}",
+            f"Relic: {items[self.equipment_slots['relic']]['name'] if self.equipment_slots['relic'] else 'Empty'}",
+        ]
+        for i, row in enumerate(slot_rows):
+            row_text = self.font_small.render(row, True, WHITE)
+            self.screen.blit(row_text, (left_x, equipment_y + 30 + i * 26))
+
+        hint_text = self.font_small.render("I/Esc close, W/S move, Enter/Space use or equip", True, GRAY)
+        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 28))
+
+    def _add_item_to_inventory(self, item_id: str, amount: int = 1):
+        if item_id not in items or amount <= 0:
+            return
+        self.inventory[item_id] = self.inventory.get(item_id, 0) + amount
+
+    def _roll_enemy_drops(self, enemy: Character) -> List[str]:
+        drop_pool = [item_id for item_id in getattr(enemy, "drop_pool", []) if item_id in items]
+        if not drop_pool:
+            return []
+
+        drop_range = getattr(enemy, "drop_count_range", [1, 1])
+        minimum = max(1, int(drop_range[0]))
+        maximum = max(minimum, int(drop_range[1]))
+        drop_total = min(len(drop_pool), random.randint(minimum, maximum))
+
+        available_ids = drop_pool[:]
+        dropped_ids: List[str] = []
+        for _ in range(drop_total):
+            weighted_pool = []
+            for item_id in available_ids:
+                rarity = items[item_id].get("rarity", "common")
+                weight = ITEM_RARITY_DROP_RATES.get(rarity, ITEM_RARITY_DROP_RATES["common"])
+                weighted_pool.append((item_id, weight))
+
+            total_weight = sum(weight for _, weight in weighted_pool)
+            if total_weight <= 0:
+                chosen_id = random.choice(available_ids)
+            else:
+                roll = random.uniform(0, total_weight)
+                running_weight = 0.0
+                chosen_id = available_ids[0]
+                for item_id, weight in weighted_pool:
+                    running_weight += weight
+                    if roll <= running_weight:
+                        chosen_id = item_id
+                        break
+
+            dropped_ids.append(chosen_id)
+            available_ids.remove(chosen_id)
+            self._add_item_to_inventory(chosen_id)
+
+        return dropped_ids
+
+    def _start_battle_turn_order(self):
+        if not self.player or not self.enemy:
+            return
+        self._message("A wild enemy appears!", 120)
+        if self.enemy.stats.speed > self.player.stats.speed:
+            self.state = GameState.ENEMY_TURN
+            self._message(f"{self.enemy.name} is faster and attacks first!", 150)
+        else:
+            self.state = GameState.BATTLE
+            self._message(f"{self.player.name} is faster and attacks first!", 150)
 
     def _apply_knockback(self, attacker: Character, target: Character, distance_pixels: int = TILE_SIZE * 4):
         dx = (target.x + target.width / 2) - (attacker.x + attacker.width / 2)
@@ -757,27 +1089,42 @@ class Game:
                 self._message(f"{target.name} is wounded!", 120)
             elif effect == "light_shield":
                 attacker.defense_bonus += 50
-                self._message(f"{attacker.name} gains 50 defense!", 120)
+                self._message(f"{attacker.name} is protected by a light shield! (+50 DEF)", 150)
             elif effect == "heavy_shield":
                 attacker.defense_bonus += 200
-                self._message(f"{attacker.name} gains 200 defense!", 120)
+                self._message(f"{attacker.name} raises a heavy shield! (+200 DEF)", 150)
             elif effect == "stinky":
-                target.apply_status("stinky", 2)
-                self._message(f"{target.name} is overwhelmed by the smell!", 120)
+                if attacker == self.player:
+                    stink_damage, stink_dodged = attacker.take_damage(12, ignore_defense=True)
+                    if stink_dodged:
+                        self._message(f"{attacker.name} dodged the stink somehow!", 150)
+                    else:
+                        self._message(f"{attacker.name} is hurt by the disgusting stink ({stink_damage:.0f} damage)", 150)
+                else:
+                    self._message(f"{attacker.name} lets out a terrible stink", 120)
 
     def _begin_turn(self, actor: Character, opponent: Character, is_player_turn: bool) -> bool:
         if actor.has_status("burn"):
-            burn_damage = actor.take_damage(6, ignore_defense=True)
-            self._message(f"{actor.name} takes {burn_damage:.0f} burn damage!", 120)
-            if not actor.is_alive():
-                self.state = GameState.PLAYER_LOST if is_player_turn else GameState.PLAYER_WON
-                if not is_player_turn:
-                    xp_reward = self.enemy.xp_reward if self.enemy else 100
-                    self.player.gain_experience(xp_reward)
-                    self._message(f"Victory! Gained {xp_reward} XP!", 180)
-                else:
-                    self._message("You were defeated!", 180)
-                return False
+            burn_damage, burn_dodged = actor.take_damage(6, ignore_defense=True)
+            if burn_dodged:
+                self._message(f"{actor.name} dodged the burn damage!", 120)
+            else:
+                self._message(f"{actor.name} takes {burn_damage:.0f} burn damage!", 120)
+
+        if not actor.is_alive():
+            self.state = GameState.PLAYER_LOST if is_player_turn else GameState.PLAYER_WON
+            if not is_player_turn:
+                xp_reward = self.enemy.xp_reward if self.enemy else 100
+                self.player.gain_experience(xp_reward)
+                self._message(f"Victory! Gained {xp_reward} XP!", 180)
+            else:
+                self._message("You were defeated!", 180)
+            return False
+
+        if actor.fire_shield_turns > 0:
+            actor.fire_shield_turns -= 1
+            if actor.fire_shield_turns == 0:
+                self._message(f"{actor.name}'s fire shield fades away.", 120)
         
         skip_statuses = [status for status in ("stun", "shock", "freeze") if actor.has_status(status)]
         if skip_statuses:
@@ -820,14 +1167,29 @@ class Game:
         if attacker.has_status("slow"):
             damage *= 0.75
         ignore_defense = "pierce" in effect_names
-        actual_damage = 0 if is_self_buff else target.take_damage(damage, ignore_defense=ignore_defense)
+        if is_self_buff:
+            actual_damage = 0
+            was_dodged = False
+        else:
+            actual_damage, was_dodged = target.take_damage(damage, ignore_defense=ignore_defense)
         attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
         
         if is_self_buff:
             self._message(f"{attacker.name} used {attack_data['name']}!", 120)
+        elif was_dodged:
+            self._message(f"{attacker.name} used {attack_data['name']}, but {target.name} dodged it!", 120)
         else:
             self._message(f"{attacker.name} used {attack_data['name']} for {actual_damage:.0f} damage!", 120)
-        self._apply_attack_effects(attacker, target, attack_data)
+
+        if not was_dodged:
+            self._apply_attack_effects(attacker, target, attack_data)
+        if not is_self_buff and actual_damage > 0 and target.fire_shield_turns > 0:
+            burn_back = target.fire_shield_damage
+            reflected_damage, reflected_dodged = attacker.take_damage(burn_back, ignore_defense=True)
+            if reflected_dodged:
+                self._message(f"{attacker.name} dodged the burning shield!", 120)
+            else:
+                self._message(f"{attacker.name} is scorched by the fire shield for {reflected_damage:.0f} damage!", 120)
         return True
 
     def _handle_defeat_if_needed(self, defeated: Character, victor: Character, victor_is_player: bool) -> bool:
@@ -838,6 +1200,10 @@ class Game:
             xp_reward = self.enemy.xp_reward if hasattr(self.enemy, "xp_reward") else 100
             self.player.gain_experience(xp_reward)
             self._message(f"Victory! Gained {xp_reward} XP!", 180)
+            dropped_items = self._roll_enemy_drops(defeated)
+            if dropped_items:
+                item_names = ", ".join(items[item_id]["name"] for item_id in dropped_items)
+                self._message(f"Enemy dropped: {item_names}", 210)
         else:
             self.state = GameState.PLAYER_LOST
             self._message("You were defeated!", 180)
@@ -856,6 +1222,12 @@ class Game:
         if not self.player.attack_ids:
             self._message("No attacks equipped!", 150)
             return
+
+        equipped_attacks = self.player.attack_ids[:5]
+        if equipped_attacks and all(self.player.cooldowns.get(attack_id, 0) > 0 for attack_id in equipped_attacks):
+            self._message("All of your moves are recharging. Turn skipped!", 150)
+            self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
+            return
         
         attack_index = min(self.selected_attack, len(self.player.attack_ids) - 1)
         attack_id = self.player.attack_ids[attack_index]
@@ -864,6 +1236,11 @@ class Game:
             return
         
         self.player.ability_charges -= 1
+
+        if not self.player.is_alive():
+            self.state = GameState.PLAYER_LOST
+            self._message("You were defeated by your own attack!", 180)
+            return
 
         if random.random() < 0.4:  # 40% chance to regain an ability charge
             if self.player.ability_charges < self.player.max_ability_charges:
@@ -904,7 +1281,7 @@ class Game:
         
         attack_used = self._execute_attack(self.enemy, self.player, chosen_attack, is_player_turn=False)
         if not attack_used:
-            self._message(f"{self.enemy.name} cannot find a clean opening.", 120)
+            self._message(f"{self.enemy.name} is too far away or waiting on cooldowns.", 120)
         
         if self._handle_defeat_if_needed(self.player, self.enemy, victor_is_player=False):
             return
@@ -983,9 +1360,7 @@ class Game:
                 current_terrain = self.terrain_map[self.player_grid_y][self.player_grid_x]
                 encounter_chance = 0.05 if current_terrain == TERRAIN_GRASS else 0.01
                 if random.random() < encounter_chance:
-                    self.create_random_enemy() #Added this
-                    self.state = GameState.BATTLE
-                    self.messages.append(GameMessage("A wild enemy appears!", 120))
+                    self.create_random_enemy()
     
     def update_battle(self):
         """Update battle state - movement and distance mechanics"""
@@ -1024,16 +1399,31 @@ class Game:
             self.draw_battle()
             self.draw_defeat_screen()
 
+        if self.show_inventory:
+            self._draw_inventory_overlay()
+
         if self.show_reset_confirm:
             self.draw_reset_confirmation()
     
     def draw_character_select(self):
         """Draw character selection screen"""
         title = self.font_large.render("SELECT YOUR CHARACTER", True, YELLOW)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 50))
+        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 45))
         
-        # Draw character options
-        char_y = 150
+        instructions = [
+            "UP/DOWN - Navigate",
+            "SPACE - Select Character",
+            "R - Recharge AC-65%"
+        ]
+        instruction_spacing = 30
+        instructions_height = len(instructions) * instruction_spacing
+        top_margin = 125
+        bottom_margin = 70 + instructions_height
+        available_height = max(220, SCREEN_HEIGHT - top_margin - bottom_margin)
+        row_height = max(62, min(88, available_height // max(1, len(self.available_characters))))
+        stat_offset = 28
+
+        char_y = top_margin
         for i, char in enumerate(self.available_characters):
             selected = i == self.selected_character_index
             color = YELLOW if selected else WHITE
@@ -1042,25 +1432,18 @@ class Game:
             name_text = self.font_small.render(f"{marker}{char['name']} - {char['description']}", True, color)
             self.screen.blit(name_text, (100, char_y))
             
-            # Show stats preview
             stats = char["stats"]
             stats_text = f"STR:{stats['strength']:.0f} ATK:{stats['attack']:.0f} MAG:{stats['magic_ability']:.0f} DEF:{stats['defense']:.0f} HP:{stats['max_hp']:.0f}"
             stats_surface = self.font_small.render(stats_text, True, GRAY)
-            self.screen.blit(stats_surface, (150, char_y + 30))
+            self.screen.blit(stats_surface, (150, char_y + stat_offset))
             
-            char_y += 100
+            char_y += row_height
         
-        # Instructions
-        instructions = [
-            "UP/DOWN - Navigate",
-            "SPACE - Select Character",
-            "R - Recharge AC-65%"
-        ]
-        inst_y = SCREEN_HEIGHT - 100
+        inst_y = SCREEN_HEIGHT - instructions_height - 55
         for instruction in instructions:
             text = self.font_small.render(instruction, True, WHITE)
             self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, inst_y))
-            inst_y += 35
+            inst_y += instruction_spacing
     
     def draw_explore(self):
         """Draw exploration screen with terrain map and player"""
@@ -1110,10 +1493,14 @@ class Game:
         
         player_xp = self.font_small.render(f"XP: {self.player.experience}", True, WHITE)
         self.screen.blit(player_xp, (10, 70))
+
+        item_total = sum(self.inventory.values())
+        inventory_text = self.font_small.render(f"Items: {item_total}", True, WHITE)
+        self.screen.blit(inventory_text, (10, 100))
         
         # Draw current position
         position_text = self.font_small.render(f"Pos: ({self.player_grid_x}, {self.player_grid_y})", True, WHITE)
-        self.screen.blit(position_text, (10, 100))
+        self.screen.blit(position_text, (10, 130))
         
         # Draw terrain type and map name
         current_terrain = self.terrain_map[self.player_grid_y][self.player_grid_x]
@@ -1125,25 +1512,25 @@ class Game:
             TERRAIN_TREE: "Tree"
         }
         terrain_text = self.font_small.render(f"Terrain: {terrain_names.get(current_terrain, 'Unknown')}", True, WHITE)
-        self.screen.blit(terrain_text, (10, 130))
+        self.screen.blit(terrain_text, (10, 160))
         
         # Draw current map name
         if self.map_data and self.current_map_index < len(self.map_data):
             map_name = self.map_data[self.current_map_index].get("name", "Unknown Map")
             map_text = self.font_small.render(f"Map: {map_name}", True, WHITE)
-            self.screen.blit(map_text, (10, 160))
+            self.screen.blit(map_text, (10, 190))
         
         # Draw instructions
         instructions = [
             "WASD/Arrows - Move",
-            "Encounter enemies randomly!",
-            "SPACE - Open menu"
+            "I - Open Inventory / Equipment",
+            "Encounter enemies randomly!"
         ]
-        inst_y = SCREEN_HEIGHT - 120
+        inst_y = SCREEN_HEIGHT - 155
         for instruction in instructions:
             text = self.font_small.render(instruction, True, YELLOW)
             self.screen.blit(text, (10, inst_y))
-            inst_y += 30
+            inst_y += 28
         
         # Draw messages
         msg_y = 150
@@ -1225,7 +1612,7 @@ class Game:
             self.screen.blit(attack_text, (x_offset, y_offset))
         
         # Draw movement instructions
-        move_text = self.font_small.render("WASD move, SPACE attack, R recover AC", True, GRAY)
+        move_text = self.font_small.render("WASD move, SPACE attack, R recover, I inventory", True, GRAY)
         move_x = max(20, SCREEN_WIDTH - move_text.get_width() - 20)
         self.screen.blit(move_text, (move_x, SCREEN_HEIGHT - 35))
         
@@ -1288,6 +1675,15 @@ class Game:
         self.player = None
         self.enemy = None
         self.messages = []
+        self.inventory = {}
+        self.equipment_slots = {
+            "helmet": None,
+            "armor": None,
+            "accessory": None,
+            "relic": None,
+        }
+        self.show_inventory = False
+        self.inventory_selection = 0
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
     

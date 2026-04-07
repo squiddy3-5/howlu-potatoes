@@ -1,58 +1,162 @@
 {
+  "paella":{
+    "name": "paella",
+    "description":"It's pretty useless, but it looks delicious. Maybe sell it at the Merchant?",
+    "effect_type": null,
+    "value": 0,
+    "rarity": "common",
+    "sell_value": 15
+  },
   "small_potion": {
     "name": "Small Potion",
     "description": "A tiny bottle that restores a little health.",
     "effect_type": "heal",
     "value": 25,
-    "rarity": "common"
+    "rarity": "common",
+    "sell_value": 8
   },
   "large_potion": {
     "name": "Large Potion",
     "description": "A stronger potion for rough battles.",
     "effect_type": "heal",
     "value": 60,
-    "rarity": "uncommon"
+    "rarity": "uncommon",
+    "sell_value": 18
   },
   "spark_tonic": {
     "name": "Spark Tonic",
     "description": "A fizzy drink that restores a little ability energy.",
     "effect_type": "ability_charges",
     "value": 1,
-    "rarity": "common"
+    "rarity": "common",
+    "sell_value": 10
   },
   "iron_bark": {
     "name": "Iron Bark",
     "description": "A hard strip of bark that can toughen defenses.",
     "effect_type": "defense",
     "value": 20,
-    "rarity": "uncommon"
+    "rarity": "uncommon",
+    "sell_value": 16
   },
   "swift_feather": {
     "name": "Swift Feather",
     "description": "A feather that hums with speed.",
     "effect_type": "speed",
     "value": 15,
-    "rarity": "uncommon"
+    "rarity": "uncommon",
+    "sell_value": 18
   },
   "ember_seed": {
     "name": "Ember Seed",
     "description": "A warm seed often found after fiery fights.",
     "effect_type": "magic",
     "value": 15,
-    "rarity": "common"
+    "rarity": "common",
+    "sell_value": 12
   },
   "lucky_potato": {
     "name": "Lucky Potato",
     "description": "A very fortunate potato. Nobody knows why.",
     "effect_type": "xp",
     "value": 50,
-    "rarity": "rare"
+    "rarity": "rare",
+    "sell_value": 45
   },
   "mystery_gravy": {
     "name": "Mystery Gravy",
     "description": "Questionable, but strangely energizing.",
     "effect_type": "heal",
     "value": 40,
-    "rarity": "rare"
+    "rarity": "rare",
+    "sell_value": 24
+  },
+  "cake": {
+    "name": "Cake",
+    "description": "A big slice of cake that restores a lot of health.",
+    "effect_type": "heal",
+    "value": 50,
+    "rarity": "uncommon",
+    "sell_value": 16
+  },
+  "fire_potion": {
+    "name": "Fire Potion",
+    "description": "Wraps you in a fiery shield that burns attackers.",
+    "effect_type": "fire_shield",
+    "value": 3,
+    "rarity": "rare",
+    "sell_value": 35
+  },
+  "apple": {
+    "name": "Apple",
+    "description": "A crisp apple that restores a little health.",
+    "effect_type": "heal",
+    "value": 25,
+    "rarity": "common",
+    "sell_value": 7
+  },
+  "ac_cupcake": {
+    "name": "AC Cupcake",
+    "description": "A sugary cupcake that restores ability charges.",
+    "effect_type": "ability_charges",
+    "value": 2,
+    "rarity": "uncommon",
+    "sell_value": 20
+  },
+  "iron_helmet": {
+    "name": "Iron Helmet",
+    "description": "A heavy helmet that adds 200 defense.",
+    "effect_type": "helmet_defense",
+    "value": 200,
+    "rarity": "rare",
+    "sell_value": 60
+  },
+  "king_crab_helmet": {
+    "name": "King Crab Helmet",
+    "description": "A regal crab shell helmet with 400 defense.",
+    "effect_type": "helmet_defense",
+    "value": 400,
+    "rarity": "refined",
+    "sell_value": 120
+  },
+  "light_leather_helmet": {
+    "name": "Light Leather Helmet",
+    "description": "A light helmet that raises max AC by 2.",
+    "effect_type": "helmet_max_ac",
+    "value": 2,
+    "rarity": "uncommon",
+    "sell_value": 18
+  },
+  "heavy_leather_helmet": {
+    "name": "Heavy Leather Helmet",
+    "description": "A sturdier leather helmet that adds 50 defense.",
+    "effect_type": "helmet_defense",
+    "value": 50,
+    "rarity": "common",
+    "sell_value": 14
+  },
+  "iron_armor": {
+    "name": "Iron Armor",
+    "description": "Solid armor that adds 200 defense.",
+    "effect_type": "armor_defense",
+    "value": 200,
+    "rarity": "rare",
+    "sell_value": 65
+  },
+  "leather_armor": {
+    "name": "Leather Armor",
+    "description": "Flexible armor that raises max AC by 3.",
+    "effect_type": "armor_max_ac",
+    "value": 3,
+    "rarity": "uncommon",
+    "sell_value": 24
+  },
+  "ninja_clothes": {
+    "name": "Ninja Clothes",
+    "description": "Light gear that gives a 30% chance to dodge attacks.",
+    "effect_type": "armor_dodge",
+    "value": 0.3,
+    "rarity": "epic",
+    "sell_value": 95
   }
 }
