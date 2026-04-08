@@ -9,6 +9,14 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, List, Dict
 
+try:
+    from PIL import Image, ImageSequence
+    PIL_AVAILABLE = True
+except Exception:
+    Image = None
+    ImageSequence = None
+    PIL_AVAILABLE = False
+
 
 
 # Load attacks and items from JSON files
@@ -62,6 +70,22 @@ YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
 GRAY = (128, 128, 128)
 DARK_RED = (139, 0, 0)
+
+ATTACK_CHOICE_TIME_MS = 10000
+GAME_VERSION = "0.10"
+INSTINCT_ATTACK_ID = "instinct_strike"
+INSTINCT_ATTACK = {
+    "name": "Instinct Strike",
+    "damage_type": "physical",
+    "base_damage": 10,
+    "range": 5,
+    "effect": "",
+    "cooldown": 0,
+    "element": "neutral",
+    "damage_calc": "attack",
+    "animation_style": "lunge",
+    "level_bonus": 6,
+}
 
 ITEM_RARITY_ORDER = ["common", "uncommon", "rare", "epic", "refined", "maxed-potato"]
 
@@ -264,15 +288,26 @@ def calculate_damage(attack_type: AttackType, attacker: Character, special_num: 
     
     return max(0, damage)
 
-def calculate_attack_damage(attacker: Character, attack_data: Dict) -> float:
+def calculate_attack_damage(attacker: Character, attack_data: Dict, distance_tiles: float = 0.0) -> float:
     """Calculate damage using JSON attack definitions."""
-    damage_type = attack_data.get("damage_type", "physical")
     base_damage = attack_data.get("base_damage", 0)
-    
-    if damage_type == "magic":
-        scaled_damage = base_damage + (attacker.stats.magic_ability / 5)
-    else:
-        scaled_damage = base_damage + (attacker.stats.attack / 6) + (attacker.stats.strength / 8)
+    level_bonus = float(attack_data.get("level_bonus", 0)) * getattr(attacker, "level", 0)
+    damage_calc = str(attack_data.get("damage_calc", attack_data.get("damage_type", "attack"))).strip().lower()
+    attack_type_map = {
+        "strength": AttackType.STRENGTH,
+        "attack": AttackType.ATTACK,
+        "magic": AttackType.MAGIC,
+        "special": AttackType.SPECIAL,
+        "double": AttackType.DOUBLE,
+        "physical": AttackType.ATTACK,
+    }
+    attack_type = attack_type_map.get(damage_calc, AttackType.ATTACK)
+    scaled_damage = base_damage + level_bonus + calculate_damage(attack_type, attacker, special_num=base_damage)
+
+    threshold = float(attack_data.get("distance_threshold", 0))
+    bonus_per_tile = float(attack_data.get("distance_bonus_per_tile", 0))
+    if bonus_per_tile > 0 and distance_tiles > threshold:
+        scaled_damage += (distance_tiles - threshold) * bonus_per_tile
     
     return max(0, scaled_damage)
 
@@ -297,10 +332,10 @@ class GameMessage:
         self.age += 1
         return self.age < self.duration
     
-    def draw(self, surface, font, y_offset: int):
+    def draw(self, surface, font, y_offset: int, x_offset: int = 50):
         alpha = 255 * (1 - (self.age / self.duration))
         text_surface = font.render(self.text, True, WHITE)
-        surface.blit(text_surface, (50, y_offset))
+        surface.blit(text_surface, (x_offset, y_offset))
 
 class GameState(Enum):
     CHARACTER_SELECT = "character_select"
@@ -329,6 +364,61 @@ def load_sprite(filename: str, fallback_size: tuple = (48, 48)) -> pygame.Surfac
         except Exception as e:
             print(f"Error loading sprite {filename}: {e}")
     return None
+
+
+def load_gif_frames(filename: str, max_size: tuple = (260, 260)) -> tuple[List[pygame.Surface], List[int]]:
+    """Load animated GIF frames via Pillow for battle cutscenes."""
+    if not PIL_AVAILABLE or not filename or not os.path.exists(filename):
+        return [], []
+
+    frames: List[pygame.Surface] = []
+    durations: List[int] = []
+    try:
+        with Image.open(filename) as gif:
+            for frame in ImageSequence.Iterator(gif):
+                rgba_frame = frame.convert("RGBA")
+                frame_surface = pygame.image.fromstring(
+                    rgba_frame.tobytes(),
+                    rgba_frame.size,
+                    rgba_frame.mode,
+                ).convert_alpha()
+                width, height = frame_surface.get_size()
+                scale = min(max_size[0] / max(1, width), max_size[1] / max(1, height), 1.0)
+                if scale != 1.0:
+                    frame_surface = pygame.transform.smoothscale(
+                        frame_surface,
+                        (max(1, int(width * scale)), max(1, int(height * scale))),
+                    )
+                frames.append(frame_surface)
+                durations.append(max(40, int(frame.info.get("duration", gif.info.get("duration", 80)))))
+    except Exception as exc:
+        print(f"Error loading GIF {filename}: {exc}")
+        return [], []
+
+    return frames, durations
+
+
+def load_attack_visual_frames(filename: str, max_size: tuple = (260, 260)) -> tuple[List[pygame.Surface], List[int]]:
+    """Load either a GIF animation or a static image for attack visuals."""
+    if not filename or not os.path.exists(filename):
+        return [], []
+
+    if filename.lower().endswith(".gif"):
+        return load_gif_frames(filename, max_size=max_size)
+
+    try:
+        surface = pygame.image.load(filename).convert_alpha()
+        width, height = surface.get_size()
+        scale = min(max_size[0] / max(1, width), max_size[1] / max(1, height), 1.0)
+        if scale != 1.0:
+            surface = pygame.transform.smoothscale(
+                surface,
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+            )
+        return [surface], [950]
+    except Exception as exc:
+        print(f"Error loading attack visual {filename}: {exc}")
+        return [], []
 
 class Game:
     def __init__(self):
@@ -364,6 +454,7 @@ class Game:
         self.selected_attack = 0
         self.last_damage_dealt = 0
         self.last_damage_taken = 0
+        self.attack_choice_deadline_ms: Optional[int] = None
         self.inventory: Dict[str, int] = {}
         self.equipment_slots: Dict[str, Optional[str]] = {
             "helmet": None,
@@ -373,6 +464,9 @@ class Game:
         }
         self.show_inventory = False
         self.inventory_selection = 0
+        self.attack_animation_cache: Dict[str, tuple[List[pygame.Surface], List[int]]] = {}
+        self.active_attack_cutscene: Optional[Dict] = None
+        self.enemy_turns_taken = 0
         
         # Movement variables
         self.player_velocity = [0, 0]  # [vx, vy]
@@ -395,6 +489,8 @@ class Game:
         self.player_move_speed = 2  # Pixels per frame when moving between tiles
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
+        self.show_quit_confirm = False
+        self.quit_confirm_choice = 1
     
     def _create_default_characters(self) -> List[Dict]:
         """Create default characters if JSON not found"""
@@ -446,10 +542,11 @@ class Game:
         if sprite_file:
             sprite = load_sprite(sprite_file)
         
+        start_x, start_y = self._grid_to_pixel_position(self.player_grid_x, self.player_grid_y, 48, 48)
         self.player = Character(
             character_data["name"],
-            self.player_grid_x * TILE_SIZE + TILE_SIZE // 2 - 24,  # Center in tile
-            self.player_grid_y * TILE_SIZE + TILE_SIZE // 2 - 24,  # Center in tile
+            start_x,
+            start_y,
             stats,
             color,
             sprite
@@ -503,9 +600,210 @@ class Game:
             self.player_target_x = self.player_grid_x
             self.player_target_y = self.player_grid_y
             # Update player pixel position
-            self.player.x = self.player_grid_x * TILE_SIZE + TILE_SIZE // 2 - self.player.width // 2
-            self.player.y = self.player_grid_y * TILE_SIZE + TILE_SIZE // 2 - self.player.height // 2
+            self.player.x, self.player.y = self._grid_to_pixel_position(
+                self.player_grid_x,
+                self.player_grid_y,
+                self.player.width,
+                self.player.height,
+            )
     
+    def _grid_to_pixel_position(self, grid_x: int, grid_y: int, width: int, height: int) -> tuple[float, float]:
+        map_pixel_width = self.map_width * TILE_SIZE
+        map_pixel_height = self.map_height * TILE_SIZE
+        pixel_x = grid_x * TILE_SIZE + TILE_SIZE // 2 - width // 2
+        pixel_y = grid_y * TILE_SIZE + TILE_SIZE // 2 - height // 2
+        pixel_x = max(0, min(pixel_x, map_pixel_width - width))
+        pixel_y = max(0, min(pixel_y, map_pixel_height - height))
+        return pixel_x, pixel_y
+
+    def _battle_log_rect(self) -> pygame.Rect:
+        return pygame.Rect(SCREEN_WIDTH - 400, 150, 360, 250)
+
+    def _battle_arena_bounds(self) -> tuple[float, float, float, float]:
+        log_rect = self._battle_log_rect()
+        return 20, 100, log_rect.left - 20, SCREEN_HEIGHT - 150
+
+    def _resolve_asset_path(self, asset_path: Optional[str]) -> Optional[str]:
+        if not asset_path:
+            return None
+        if os.path.isabs(asset_path):
+            return asset_path
+        return os.path.join(os.getcwd(), asset_path)
+
+    def _get_attack_animation(self, attack_data: Dict) -> tuple[List[pygame.Surface], List[int]]:
+        asset_path = self._resolve_asset_path(attack_data.get("animation_gif") or attack_data.get("animation_image"))
+        if not asset_path:
+            return [], []
+        if asset_path not in self.attack_animation_cache:
+            self.attack_animation_cache[asset_path] = load_attack_visual_frames(asset_path)
+        return self.attack_animation_cache[asset_path]
+
+    def _character_center(self, character: Character) -> tuple[float, float]:
+        return character.x + character.width / 2, character.y + character.height / 2
+
+    def _infer_attack_animation_style(self, attack_data: Dict) -> str:
+        explicit_style = attack_data.get("animation_style")
+        if explicit_style:
+            return str(explicit_style).lower()
+
+        effects = set(get_attack_effects(attack_data))
+        if any(effect in {"light_shield", "heavy_shield"} for effect in effects):
+            return "aura"
+        if attack_data.get("damage_type") == "magic":
+            return "projectile" if attack_data.get("range", 0) >= 6 else "burst"
+        if attack_data.get("range", 0) <= 2:
+            return "lunge"
+        return "burst"
+
+    def _start_attack_cutscene(self, attacker: Character, target: Character, attack_data: Dict):
+        frames, durations = self._get_attack_animation(attack_data)
+        default_duration_ms = int(attack_data.get("cutscene_ms", 950))
+        total_duration_ms = min(1800, max(650, sum(durations) if durations else default_duration_ms))
+        start_x, start_y = self._character_center(attacker)
+        end_x, end_y = self._character_center(target)
+        self.active_attack_cutscene = {
+            "started_at_ms": pygame.time.get_ticks(),
+            "duration_ms": total_duration_ms,
+            "attacker_name": attacker.name,
+            "target_name": target.name,
+            "attack_name": attack_data.get("name", "Unknown Attack"),
+            "element": attack_data.get("element", "neutral"),
+            "animation_style": self._infer_attack_animation_style(attack_data),
+            "start_pos": (start_x, start_y),
+            "end_pos": (end_x, end_y),
+            "is_self_buff": attacker == target or attack_data.get("base_damage", 0) == 0,
+            "frames": frames,
+            "durations": durations,
+        }
+
+    def _update_attack_cutscene(self):
+        if not self.active_attack_cutscene:
+            return
+        elapsed_ms = pygame.time.get_ticks() - self.active_attack_cutscene["started_at_ms"]
+        if elapsed_ms >= self.active_attack_cutscene["duration_ms"]:
+            self.active_attack_cutscene = None
+
+    def _attack_element_color(self, element: str) -> tuple[int, int, int]:
+        return {
+            "water": (80, 180, 255),
+            "lightning": (255, 245, 120),
+            "earth": (170, 120, 70),
+            "wind": (180, 240, 220),
+            "fire": (255, 120, 70),
+            "ice": (170, 240, 255),
+            "nature": (110, 220, 110),
+            "physical": (235, 235, 235),
+            "metal": (195, 205, 225),
+            "crystal": (160, 255, 245),
+            "stink": (150, 190, 70),
+            "void": (170, 110, 220),
+            "neutral": (225, 225, 225),
+        }.get(str(element).lower(), WHITE)
+
+    def _draw_attack_cutscene(self):
+        if not self.active_attack_cutscene:
+            return
+
+        cutscene = self.active_attack_cutscene
+        elapsed_ms = pygame.time.get_ticks() - cutscene["started_at_ms"]
+        duration_ms = max(1, cutscene["duration_ms"])
+        progress = max(0.0, min(1.0, elapsed_ms / duration_ms))
+        effect_color = self._attack_element_color(cutscene["element"])
+        start_x, start_y = cutscene["start_pos"]
+        end_x, end_y = cutscene["end_pos"]
+        style = cutscene["animation_style"]
+
+        banner = self.font_small.render(
+            f"{cutscene['attacker_name']} uses {cutscene['attack_name']}!",
+            True,
+            YELLOW,
+        )
+        self.screen.blit(banner, (SCREEN_WIDTH // 2 - banner.get_width() // 2, 118))
+
+        frames = cutscene["frames"]
+        frame_surface = None
+        if frames:
+            durations = cutscene["durations"]
+            total_cycle = max(1, sum(durations))
+            cycle_elapsed = elapsed_ms % total_cycle
+            running_ms = 0
+            frame_surface = frames[0]
+            for frame_surface, frame_duration in zip(frames, durations):
+                running_ms += frame_duration
+                if cycle_elapsed < running_ms:
+                    break
+
+        if style == "aura" or cutscene["is_self_buff"]:
+            pulse = 0.5 + 0.5 * math.sin(elapsed_ms / 70)
+            for ring_index in range(3):
+                radius = int(34 + ring_index * 18 + pulse * 10)
+                pygame.draw.circle(self.screen, effect_color, (int(start_x), int(start_y)), radius, 4)
+            if frame_surface:
+                frame_x = int(start_x - frame_surface.get_width() / 2)
+                frame_y = int(start_y - frame_surface.get_height() / 2)
+                self.screen.blit(frame_surface, (frame_x, frame_y))
+            return
+
+        if style == "beam":
+            beam_progress = min(1.0, 0.55 + 1.35 * progress)
+            beam_end_x = start_x + (end_x - start_x) * beam_progress
+            beam_end_y = start_y + (end_y - start_y) * beam_progress
+            pygame.draw.line(self.screen, effect_color, (start_x, start_y), (beam_end_x, beam_end_y), 12)
+            pygame.draw.line(self.screen, WHITE, (start_x, start_y), (beam_end_x, beam_end_y), 4)
+            impact_radius = int(18 + 24 * progress)
+            pygame.draw.circle(self.screen, effect_color, (int(beam_end_x), int(beam_end_y)), impact_radius, 4)
+            if frame_surface:
+                frame_x = int(beam_end_x - frame_surface.get_width() / 2)
+                frame_y = int(beam_end_y - frame_surface.get_height() / 2)
+                self.screen.blit(frame_surface, (frame_x, frame_y))
+            return
+
+        if style == "lunge":
+            lunge_progress = min(1.0, progress / 0.7)
+            current_x = start_x + (end_x - start_x) * lunge_progress
+            current_y = start_y + (end_y - start_y) * lunge_progress
+            for slash_offset in (-14, 0, 14):
+                pygame.draw.line(
+                    self.screen,
+                    effect_color,
+                    (current_x - 24, current_y - 12 + slash_offset),
+                    (current_x + 24, current_y + 12 + slash_offset),
+                    4,
+                )
+            if frame_surface:
+                frame_x = int(current_x - frame_surface.get_width() / 2)
+                frame_y = int(current_y - frame_surface.get_height() / 2)
+                self.screen.blit(frame_surface, (frame_x, frame_y))
+            return
+
+        if style == "burst":
+            burst_progress = 0.2 + 0.8 * progress
+            impact_x = start_x + (end_x - start_x) * burst_progress
+            impact_y = start_y + (end_y - start_y) * burst_progress
+            for ring_index in range(3):
+                radius = int(18 + ring_index * 16 + progress * 20)
+                pygame.draw.circle(self.screen, effect_color, (int(impact_x), int(impact_y)), radius, 3)
+            if frame_surface:
+                frame_x = int(impact_x - frame_surface.get_width() / 2)
+                frame_y = int(impact_y - frame_surface.get_height() / 2)
+                self.screen.blit(frame_surface, (frame_x, frame_y))
+            return
+
+        projectile_progress = min(1.0, progress / 0.72)
+        projectile_x = start_x + (end_x - start_x) * projectile_progress
+        projectile_y = start_y + (end_y - start_y) * projectile_progress
+        pygame.draw.line(self.screen, effect_color, (start_x, start_y), (projectile_x, projectile_y), 4)
+        if frame_surface:
+            frame_x = int(projectile_x - frame_surface.get_width() / 2)
+            frame_y = int(projectile_y - frame_surface.get_height() / 2)
+            self.screen.blit(frame_surface, (frame_x, frame_y))
+        else:
+            pygame.draw.circle(self.screen, effect_color, (int(projectile_x), int(projectile_y)), 22)
+            pygame.draw.circle(self.screen, WHITE, (int(projectile_x), int(projectile_y)), 10)
+        if progress > 0.68:
+            impact_radius = int(22 + (progress - 0.68) * 80)
+            pygame.draw.circle(self.screen, effect_color, (int(end_x), int(end_y)), impact_radius, 4)
+
     def _generate_default_map(self) -> List[List[int]]:
         """Generate a default terrain map if no JSON maps available"""
         self.map_width = SCREEN_WIDTH // TILE_SIZE
@@ -580,17 +878,24 @@ class Game:
         self.enemy.drop_count_range = enemy_config.get("drop_count_range", [1, 2])
         enemy_attacks = enemy_config.get("attack_pool")
         if not enemy_attacks:
-            enemy_attacks = random.sample(list(attacks.keys()), k=min(4, len(attacks)))
+            enemy_attack_pool = [attack_id for attack_id in attacks.keys() if attack_id != "stinky_fart"]
+            enemy_attacks = random.sample(enemy_attack_pool, k=min(4, len(enemy_attack_pool)))
+        enemy_attacks = [attack_id for attack_id in enemy_attacks if attack_id != "stinky_fart"]
+        if "tether_lash" not in enemy_attacks:
+            enemy_attacks.append("tether_lash")
         self.enemy.set_attack_loadout(enemy_attacks)
         self.enemy.defense_bonus = 0
         self.messages = []
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
+        self.show_quit_confirm = False
+        self.quit_confirm_choice = 1
         self.show_inventory = False
         self.inventory_selection = 0
         self.selected_attack = 0
         self.player_velocity = [0, 0]
         self.enemy_velocity = [0, 0]
+        self.enemy_turns_taken = 0
         self.player.x = 120
         self.player.y = SCREEN_HEIGHT // 2 - 24
         self._start_battle_turn_order()
@@ -601,9 +906,18 @@ class Game:
                 self.running = False
             
             if event.type == pygame.KEYDOWN:
+                quit_shortcut = event.key == pygame.K_w and (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META))
+                if quit_shortcut:
+                    self.open_quit_confirmation()
+                    continue
+
                 reset_shortcut = event.key == pygame.K_x and (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META))
                 if reset_shortcut and self.state != GameState.CHARACTER_SELECT:
                     self.open_reset_confirmation()
+                    continue
+
+                if self.show_quit_confirm:
+                    self.handle_quit_confirmation_input(event)
                     continue
 
                 if self.show_reset_confirm:
@@ -612,6 +926,9 @@ class Game:
 
                 if self.show_inventory:
                     self._handle_inventory_input(event)
+                    continue
+
+                if self.active_attack_cutscene:
                     continue
 
                 if self.state == GameState.CHARACTER_SELECT: 
@@ -675,11 +992,34 @@ class Game:
             
             elif event.type == pygame.KEYUP:
                 # Stop movement
-                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_inventory:
+                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_quit_confirm and not self.show_inventory:
                     if event.key in [pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s]:
                         self.player_velocity[1] = 0
                     elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d]:
                         self.player_velocity[0] = 0
+
+    def open_quit_confirmation(self):
+        self.show_quit_confirm = True
+        self.quit_confirm_choice = 1
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+
+    def handle_quit_confirmation_input(self, event):
+        if event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w]:
+            self.quit_confirm_choice = 0
+        elif event.key in [pygame.K_RIGHT, pygame.K_d, pygame.K_DOWN, pygame.K_s]:
+            self.quit_confirm_choice = 1
+        elif event.key in [pygame.K_ESCAPE, pygame.K_n]:
+            self.show_quit_confirm = False
+            self.quit_confirm_choice = 1
+        elif event.key in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_y]:
+            if self.quit_confirm_choice == 0:
+                self.show_quit_confirm = False
+                self.running = False
+            else:
+                self.show_quit_confirm = False
+                self.quit_confirm_choice = 1
+
     def open_reset_confirmation(self):
         self.show_reset_confirm = True
         self.reset_confirm_choice = 1
@@ -906,10 +1246,11 @@ class Game:
             for i, item_id in enumerate(inventory_ids[:10]):
                 item_data = items[item_id]
                 rarity_color = get_item_rarity_color(item_data)
-                color = rarity_color if i == self.inventory_selection else rarity_color
+                selected = i == self.inventory_selection
+                color = YELLOW if selected else rarity_color
                 slot_name = self._equipment_slot_for_item(item_id)
                 suffix = f" [{slot_name}]" if slot_name else ""
-                prefix = ">> " if i == self.inventory_selection else ""
+                prefix = ">> " if selected else ""
                 item_text = self.font_small.render(f"{prefix}{item_data['name']} x{self.inventory[item_id]}{suffix}", True, color)
                 self.screen.blit(item_text, (left_x, start_y + i * row_height))
 
@@ -931,7 +1272,7 @@ class Game:
             empty_text = self.font_small.render("No items in inventory.", True, WHITE)
             self.screen.blit(empty_text, (left_x, start_y))
 
-        equipment_y = box_y + box_height - 150
+        equipment_y = box_y + box_height - 180
         equipment_title = self.font_small.render("Equipped", True, YELLOW)
         self.screen.blit(equipment_title, (left_x, equipment_y))
         slot_rows = [
@@ -945,7 +1286,7 @@ class Game:
             self.screen.blit(row_text, (left_x, equipment_y + 30 + i * 26))
 
         hint_text = self.font_small.render("I/Esc close, W/S move, Enter/Space use or equip", True, GRAY)
-        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 28))
+        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 46))
 
     def _add_item_to_inventory(self, item_id: str, amount: int = 1):
         if item_id not in items or amount <= 0:
@@ -990,15 +1331,39 @@ class Game:
 
         return dropped_ids
 
+    def _start_player_attack_timer(self):
+        self.attack_choice_deadline_ms = pygame.time.get_ticks() + ATTACK_CHOICE_TIME_MS
+
+    def _clear_player_attack_timer(self):
+        self.attack_choice_deadline_ms = None
+
+    def _get_attack_choice_time_left(self) -> float:
+        if self.attack_choice_deadline_ms is None:
+            return 0.0
+        return max(0.0, (self.attack_choice_deadline_ms - pygame.time.get_ticks()) / 1000.0)
+
+    def _handle_attack_choice_timeout(self):
+        if self.state != GameState.BATTLE or not self.player or not self.enemy:
+            return
+        if self.attack_choice_deadline_ms is None:
+            return
+        if pygame.time.get_ticks() < self.attack_choice_deadline_ms:
+            return
+        self.player_velocity = [0, 0]
+        self._message("Time ran out! Your turn was skipped.", 150)
+        self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
+
     def _start_battle_turn_order(self):
         if not self.player or not self.enemy:
             return
         self._message("A wild enemy appears!", 120)
         if self.enemy.stats.speed > self.player.stats.speed:
             self.state = GameState.ENEMY_TURN
+            self._clear_player_attack_timer()
             self._message(f"{self.enemy.name} is faster and attacks first!", 150)
         else:
             self.state = GameState.BATTLE
+            self._start_player_attack_timer()
             self._message(f"{self.player.name} is faster and attacks first!", 150)
 
     def _apply_knockback(self, attacker: Character, target: Character, distance_pixels: int = TILE_SIZE * 4):
@@ -1011,8 +1376,9 @@ class Game:
         push_y = (dy / length) * distance_pixels
         target.x += push_x
         target.y += push_y
-        target.x = max(50, min(target.x, SCREEN_WIDTH - target.width - 50))
-        target.y = max(100, min(target.y, SCREEN_HEIGHT - 150))
+        arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
+        target.x = max(arena_left + 30, min(target.x, arena_right - target.width - 30))
+        target.y = max(arena_top, min(target.y, arena_bottom - target.height))
 
     def _get_attack_range(self, character: Character, attack_id: str) -> int:
         attack_data = attacks.get(attack_id, {})
@@ -1047,6 +1413,7 @@ class Game:
         distance_pixels = math.hypot(dx, dy)
         target_distance_pixels = self._get_enemy_target_range() * TILE_SIZE
         tolerance = TILE_SIZE * 0.35
+        pressure_speed = self.enemy_move_speed + 1.5 if distance_pixels > target_distance_pixels + TILE_SIZE * 2 else self.enemy_move_speed
         
         move_x = 0.0
         move_y = 0.0
@@ -1054,8 +1421,8 @@ class Game:
             unit_x = dx / distance_pixels
             unit_y = dy / distance_pixels
             if distance_pixels > target_distance_pixels + tolerance:
-                move_x = unit_x * self.enemy_move_speed
-                move_y = unit_y * self.enemy_move_speed
+                move_x = unit_x * pressure_speed
+                move_y = unit_y * pressure_speed
             elif distance_pixels < max(TILE_SIZE, target_distance_pixels - tolerance):
                 move_x = -unit_x * self.enemy_move_speed
                 move_y = -unit_y * self.enemy_move_speed
@@ -1064,8 +1431,10 @@ class Game:
         self.enemy_velocity[1] = move_y
         self.enemy.x += self.enemy_velocity[0]
         self.enemy.y += self.enemy_velocity[1]
-        self.enemy.x = max(SCREEN_WIDTH * 0.55, min(self.enemy.x, SCREEN_WIDTH - self.enemy.width - 70))
-        self.enemy.y = max(100, min(self.enemy.y, SCREEN_HEIGHT - 150))
+        _, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
+        enemy_left_bound = max(SCREEN_WIDTH * 0.44, arena_right - 260)
+        self.enemy.x = max(enemy_left_bound, min(self.enemy.x, arena_right - self.enemy.width - 20))
+        self.enemy.y = max(arena_top + 10, min(self.enemy.y, arena_bottom - self.enemy.height - 35))
 
     def _apply_attack_effects(self, attacker: Character, target: Character, attack_data: Dict):
         for effect in get_attack_effects(attack_data):
@@ -1137,15 +1506,24 @@ class Game:
         actor.tick_cooldowns()
         actor.tick_statuses()
         self.state = next_state
+        if next_state == GameState.BATTLE:
+            self._start_player_attack_timer()
+        else:
+            self._clear_player_attack_timer()
+
+    def _all_equipped_attacks_on_cooldown(self, character: Character) -> bool:
+        equipped_attacks = character.attack_ids[:5]
+        return bool(equipped_attacks) and all(character.cooldowns.get(attack_id, 0) > 0 for attack_id in equipped_attacks)
 
     def _execute_attack(self, attacker: Character, target: Character, attack_id: str, is_player_turn: bool) -> bool:
-        attack_data = attacks.get(attack_id)
+        attack_data = INSTINCT_ATTACK if attack_id == INSTINCT_ATTACK_ID else attacks.get(attack_id)
         if not attack_data:
             self._message(f"Missing attack data for {attack_id}", 180)
             return False
         
-        if attacker.cooldowns.get(attack_id, 0) > 0:
-            self._message(f"{attack_data['name']} is on cooldown for {attacker.cooldowns[attack_id]} more turn(s).", 150)
+        current_cooldown = 0 if attack_id == INSTINCT_ATTACK_ID else attacker.cooldowns.get(attack_id, 0)
+        if current_cooldown > 0:
+            self._message(f"{attack_data['name']} is on cooldown for {current_cooldown} more turn(s).", 150)
             return False
         
         effect_names = get_attack_effects(attack_data)
@@ -1160,10 +1538,11 @@ class Game:
         
         if attacker.has_status("stinky") and random.random() < 0.5:
             self._message(f"{attacker.name} whiffs the attack while reeling from the smell!", 150)
-            attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
+            if attack_id != INSTINCT_ATTACK_ID:
+                attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
             return True
         
-        damage = calculate_attack_damage(attacker, attack_data)
+        damage = calculate_attack_damage(attacker, attack_data, distance_tiles=distance)
         if attacker.has_status("slow"):
             damage *= 0.75
         ignore_defense = "pierce" in effect_names
@@ -1172,7 +1551,8 @@ class Game:
             was_dodged = False
         else:
             actual_damage, was_dodged = target.take_damage(damage, ignore_defense=ignore_defense)
-        attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
+        if attack_id != INSTINCT_ATTACK_ID:
+            attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
         
         if is_self_buff:
             self._message(f"{attacker.name} used {attack_data['name']}!", 120)
@@ -1180,6 +1560,8 @@ class Game:
             self._message(f"{attacker.name} used {attack_data['name']}, but {target.name} dodged it!", 120)
         else:
             self._message(f"{attacker.name} used {attack_data['name']} for {actual_damage:.0f} damage!", 120)
+
+        self._start_attack_cutscene(attacker, target, attack_data)
 
         if not was_dodged:
             self._apply_attack_effects(attacker, target, attack_data)
@@ -1223,14 +1605,12 @@ class Game:
             self._message("No attacks equipped!", 150)
             return
 
-        equipped_attacks = self.player.attack_ids[:5]
-        if equipped_attacks and all(self.player.cooldowns.get(attack_id, 0) > 0 for attack_id in equipped_attacks):
-            self._message("All of your moves are recharging. Turn skipped!", 150)
-            self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
-            return
-        
-        attack_index = min(self.selected_attack, len(self.player.attack_ids) - 1)
-        attack_id = self.player.attack_ids[attack_index]
+        if self._all_equipped_attacks_on_cooldown(self.player):
+            attack_id = INSTINCT_ATTACK_ID
+            self._message("All moves are recharging. Instinct Strike kicks in!", 150)
+        else:
+            attack_index = min(self.selected_attack, len(self.player.attack_ids) - 1)
+            attack_id = self.player.attack_ids[attack_index]
         attack_used = self._execute_attack(self.player, self.enemy, attack_id, is_player_turn=True)
         if not attack_used:
             return
@@ -1257,17 +1637,26 @@ class Game:
         if not self._begin_turn(self.enemy, self.player, is_player_turn=False):
             return
         
+        current_distance = self._distance_in_tiles(self.enemy, self.player)
         available_attacks = [
             attack_id for attack_id in self.enemy.attack_ids
             if self.enemy.cooldowns.get(attack_id, 0) == 0
         ]
         in_range_attacks = [
             attack_id for attack_id in available_attacks
-            if self._distance_in_tiles(self.enemy, self.player) <= attacks[attack_id].get("range", 1)
+            if current_distance <= attacks[attack_id].get("range", 1)
         ]
         
         chosen_attack = None
-        if in_range_attacks:
+        tether_ready = [
+            attack_id for attack_id in available_attacks
+            if attack_id == "tether_lash"
+            and self.enemy_turns_taken > 0
+            and current_distance >= attacks[attack_id].get("distance_threshold", 6)
+        ]
+        if tether_ready:
+            chosen_attack = tether_ready[0]
+        elif in_range_attacks:
             chosen_attack = random.choice(in_range_attacks)
         elif available_attacks:
             chosen_attack = random.choice(available_attacks)
@@ -1286,11 +1675,15 @@ class Game:
         if self._handle_defeat_if_needed(self.player, self.enemy, victor_is_player=False):
             return
         
+        self.enemy_turns_taken += 1
         self._finish_turn(self.enemy, next_state=GameState.BATTLE)
     
     def update(self):
         # Update messages
         self.messages = [msg for msg in self.messages if msg.update()]
+        self._update_attack_cutscene()
+        if self.active_attack_cutscene:
+            return
         
         # Update player movement
         if self.state == GameState.EXPLORE:
@@ -1330,8 +1723,12 @@ class Game:
         
         # Move towards target position
         if self.player_moving:
-            target_pixel_x = self.player_target_x * TILE_SIZE + TILE_SIZE // 2 - self.player.width // 2
-            target_pixel_y = self.player_target_y * TILE_SIZE + TILE_SIZE // 2 - self.player.height // 2
+            target_pixel_x, target_pixel_y = self._grid_to_pixel_position(
+                self.player_target_x,
+                self.player_target_y,
+                self.player.width,
+                self.player.height,
+            )
             
             # Calculate movement
             dx = target_pixel_x - self.player.x
@@ -1364,6 +1761,10 @@ class Game:
     
     def update_battle(self):
         """Update battle state - movement and distance mechanics"""
+        self._handle_attack_choice_timeout()
+        if self.state != GameState.BATTLE:
+            return
+
         current_move_speed = self.move_speed
         if self.player.has_status("slow"):
             current_move_speed = max(2, self.move_speed // 2)
@@ -1375,8 +1776,10 @@ class Game:
         self.player.y += math.copysign(min(abs(self.player_velocity[1]), current_move_speed), self.player_velocity[1]) if self.player_velocity[1] else 0
         
         # Clamp player to screen bounds (battle arena)
-        self.player.x = max(50, min(self.player.x, SCREEN_WIDTH * 0.62 - self.player.width))
-        self.player.y = max(0, min(self.player.y, SCREEN_HEIGHT - 150))
+        arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
+        player_right_bound = min(SCREEN_WIDTH * 0.66, arena_right - 120)
+        self.player.x = max(arena_left + 40, min(self.player.x, player_right_bound - self.player.width))
+        self.player.y = max(arena_top + 10, min(self.player.y, arena_bottom - self.player.height - 35))
         
         self._update_enemy_movement()
         
@@ -1402,13 +1805,21 @@ class Game:
         if self.show_inventory:
             self._draw_inventory_overlay()
 
+        if self.active_attack_cutscene:
+            self._draw_attack_cutscene()
+
+        if self.show_quit_confirm:
+            self.draw_quit_confirmation()
+
         if self.show_reset_confirm:
             self.draw_reset_confirmation()
     
     def draw_character_select(self):
         """Draw character selection screen"""
-        title = self.font_large.render("SELECT YOUR CHARACTER", True, YELLOW)
+        title = self.font_large.render("HOWLU'S QUEST FOR THE POTATO", True, YELLOW)
         self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 45))
+        version_text = self.font_small.render(f"Version {GAME_VERSION}", True, GRAY)
+        self.screen.blit(version_text, (SCREEN_WIDTH // 2 - version_text.get_width() // 2, 78))
         
         instructions = [
             "UP/DOWN - Navigate",
@@ -1520,33 +1931,37 @@ class Game:
             map_text = self.font_small.render(f"Map: {map_name}", True, WHITE)
             self.screen.blit(map_text, (10, 190))
         
-        # Draw instructions
+        # Draw instructions in a compact top-right HUD panel
         instructions = [
             "WASD/Arrows - Move",
             "I - Open Inventory / Equipment",
             "Encounter enemies randomly!"
         ]
-        inst_y = SCREEN_HEIGHT - 155
+        panel_width = 320
+        panel_height = 96
+        panel_x = SCREEN_WIDTH - panel_width - 12
+        panel_y = 8
+        pygame.draw.rect(self.screen, (18, 18, 24), (panel_x, panel_y, panel_width, panel_height))
+        pygame.draw.rect(self.screen, YELLOW, (panel_x, panel_y, panel_width, panel_height), 2)
+
+        inst_y = panel_y + 10
         for instruction in instructions:
             text = self.font_small.render(instruction, True, YELLOW)
-            self.screen.blit(text, (10, inst_y))
-            inst_y += 28
+            self.screen.blit(text, (panel_x + 10, inst_y))
+            inst_y += 26
         
-        # Draw messages
-        msg_y = 150
-        for msg in self.messages:
+        # Draw recent messages below the stat block so they don't cover the map center
+        msg_y = 220
+        for msg in self.messages[-4:]:
             msg.draw(self.screen, self.font_small, msg_y)
-            msg_y += 30
+            msg_y += 28
     
     def draw_battle(self):
         # Draw battle arena background
         self.screen.fill((30, 30, 40))
         
         # Draw arena boundaries
-        arena_left = 20
-        arena_right = SCREEN_WIDTH - 20
-        arena_top = 100
-        arena_bottom = SCREEN_HEIGHT - 150
+        arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
         
         pygame.draw.rect(self.screen, (100, 100, 120), (arena_left, arena_top, arena_right - arena_left, arena_bottom - arena_top), 2)
         
@@ -1573,14 +1988,20 @@ class Game:
         # Draw AC and stats
         ac_text = self.font_small.render(f"AC: {self.player.ability_charges}/{self.player.max_ability_charges}", True, YELLOW)
         self.screen.blit(ac_text, (20, 50))
+        if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None:
+            time_left = self._get_attack_choice_time_left()
+            timer_color = RED if time_left <= 2 else YELLOW
+            timer_text = self.font_small.render(f"Choose attack: {time_left:.1f}s", True, timer_color)
+            self.screen.blit(timer_text, (20, 80))
         distance = self._distance_in_tiles(self.player, self.enemy)
         distance_text = self.font_small.render(f"Distance: {distance:.1f} tiles", True, WHITE)
-        self.screen.blit(distance_text, (20, 80))
+        self.screen.blit(distance_text, (20, 110 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 80))
         
         if self.player.status_effects:
             player_status = ", ".join(f"{name}:{turns}" for name, turns in self.player.status_effects.items())
+            status_y = 140 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 110
             status_text = self.font_small.render(f"Status: {player_status}", True, WHITE)
-            self.screen.blit(status_text, (20, 110))
+            self.screen.blit(status_text, (20, status_y))
         if self.enemy.status_effects:
             enemy_status = ", ".join(f"{name}:{turns}" for name, turns in self.enemy.status_effects.items())
             enemy_status_text = self.font_small.render(f"Enemy: {enemy_status}", True, WHITE)
@@ -1610,16 +2031,32 @@ class Game:
             x_offset = 20 + column * (attack_box_width + attack_gap_x)
             y_offset = attack_y + 30 + row * (attack_box_height + attack_gap_y)
             self.screen.blit(attack_text, (x_offset, y_offset))
+
+        if self._all_equipped_attacks_on_cooldown(self.player):
+            instinct_text = self.font_small.render(
+                f"Fallback: {INSTINCT_ATTACK['name']} R:{INSTINCT_ATTACK['range']}",
+                True,
+                YELLOW,
+            )
+            self.screen.blit(instinct_text, (20, attack_y - 28))
         
         # Draw movement instructions
         move_text = self.font_small.render("WASD move, SPACE attack, R recover, I inventory", True, GRAY)
         move_x = max(20, SCREEN_WIDTH - move_text.get_width() - 20)
         self.screen.blit(move_text, (move_x, SCREEN_HEIGHT - 35))
         
-        # Draw messages
-        msg_y = SCREEN_HEIGHT // 2 - 200
-        for msg in self.messages:
-            msg.draw(self.screen, self.font_small, msg_y)
+        # Draw messages in a dedicated battle log panel
+        log_rect = self._battle_log_rect()
+        log_x = log_rect.x
+        log_y = log_rect.y
+        pygame.draw.rect(self.screen, (22, 22, 32), log_rect)
+        pygame.draw.rect(self.screen, (110, 110, 140), log_rect, 2)
+        log_title = self.font_small.render("Battle Log", True, YELLOW)
+        self.screen.blit(log_title, (log_x + 12, log_y + 10))
+
+        msg_y = log_y + 42
+        for msg in self.messages[-7:]:
+            msg.draw(self.screen, self.font_small, msg_y, log_x + 12)
             msg_y += 30
     
     def draw_reset_confirmation(self):
@@ -1638,7 +2075,7 @@ class Game:
         title_x = SCREEN_WIDTH // 2 - title.get_width() // 2
         self.screen.blit(title, (title_x, box_y + 30))
 
-        body = self.font_small.render("Current battle/exploration progress will be lost.", True, WHITE)
+        body = self.font_small.render("Current progress and items will be lost.", True, WHITE)
         body_x = SCREEN_WIDTH // 2 - body.get_width() // 2
         self.screen.blit(body, (body_x, box_y + 85))
 
@@ -1650,6 +2087,37 @@ class Game:
         self.screen.blit(no_text, (box_x + box_width - no_text.get_width() - 110, box_y + 145))
 
         hint = self.font_small.render("Use A/D or arrows, then Enter or Space", True, GRAY)
+        hint_x = SCREEN_WIDTH // 2 - hint.get_width() // 2
+        self.screen.blit(hint, (hint_x, box_y + 185))
+
+    def draw_quit_confirmation(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 520
+        box_height = 220
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+        pygame.draw.rect(self.screen, (35, 35, 55), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+
+        title = self.font_large.render("Close The Game?", True, YELLOW)
+        title_x = SCREEN_WIDTH // 2 - title.get_width() // 2
+        self.screen.blit(title, (title_x, box_y + 30))
+
+        body = self.font_small.render("Are you sure you want to close the window?", True, WHITE)
+        body_x = SCREEN_WIDTH // 2 - body.get_width() // 2
+        self.screen.blit(body, (body_x, box_y + 85))
+
+        yes_color = YELLOW if self.quit_confirm_choice == 0 else WHITE
+        no_color = YELLOW if self.quit_confirm_choice == 1 else WHITE
+        yes_text = self.font_large.render("[ Yes ]", True, yes_color)
+        no_text = self.font_large.render("[ No ]", True, no_color)
+        self.screen.blit(yes_text, (box_x + 110, box_y + 145))
+        self.screen.blit(no_text, (box_x + box_width - no_text.get_width() - 110, box_y + 145))
+
+        hint = self.font_small.render("Use A/D or arrows, then Enter or Space to select", True, GRAY)
         hint_x = SCREEN_WIDTH // 2 - hint.get_width() // 2
         self.screen.blit(hint, (hint_x, box_y + 185))
 
@@ -1682,8 +2150,13 @@ class Game:
             "accessory": None,
             "relic": None,
         }
+        self.active_attack_cutscene = None
+        self.enemy_turns_taken = 0
         self.show_inventory = False
         self.inventory_selection = 0
+        self.attack_choice_deadline_ms = None
+        self.show_quit_confirm = False
+        self.quit_confirm_choice = 1
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
     

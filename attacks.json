@@ -2,6 +2,9 @@
   "water_blast": {
     "name": "Water Blast",
     "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "beam",
+    "animation_image": "attack_gifs/waterSplash.png",
     "base_damage": 30,
     "range": 6,
     "effect": "knockback",
@@ -11,6 +14,8 @@
   "lightning_strike": {
     "name": "Lightning Strike",
     "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "burst",
     "base_damage": 75,
     "range": 10,
     "effect": "shock",
@@ -20,6 +25,7 @@
   "earth_shock": {
     "name": "Earth Shock",
     "damage_type": "magic",
+    "damage_calc": "magic",
     "base_damage": 45,
     "range": 6,
     "effect": "slow",
@@ -29,7 +35,8 @@
   "wind_blade": {
     "name": "Wind Blade",
     "damage_type": "magic",
-    "base_damage": 60,
+    "damage_calc": "magic",
+    "base_damage": 85,
     "range": 4,
     "effect": "wounded",
     "cooldown": 2,
@@ -38,6 +45,8 @@
   "fireball": {
     "name": "Fireball",
     "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "projectile",
     "base_damage": 40,
     "range": 8,
     "effect": "burn",
@@ -47,6 +56,7 @@
   "ice_shard": {
     "name": "Ice Shard",
     "damage_type": "magic",
+    "damage_calc": "magic",
     "base_damage": 35,
     "range": 8,
     "effect": "freeze",
@@ -56,6 +66,7 @@
   "grass_knot": {
     "name": "Grass Knot",
     "damage_type": "magic",
+    "damage_calc": "magic",
     "base_damage": 35,
     "range": 6,
     "effect": "slow",
@@ -65,6 +76,8 @@
   "striking_hit": {
     "name": "Striking Hit",
     "damage_type": "physical",
+    "damage_calc": "double",
+    "animation_style": "lunge",
     "base_damage": 50,
     "range": 5,
     "effect": "knockback",
@@ -74,6 +87,8 @@
   "shield_bash": {
     "name": "Shield Bash",
     "damage_type": "physical",
+    "damage_calc": "strength",
+    "animation_style": "lunge",
     "base_damage": 65,
     "range": 5,
     "effect": "light_shield",
@@ -83,6 +98,8 @@
   "round_sweep": {
     "name": "Round Sweep",
     "damage_type": "physical",
+    "damage_calc": "strength",
+    "animation_style": "burst",
     "base_damage": 50,
     "range": 5,
     "effect": "knockback",
@@ -92,6 +109,8 @@
   "shield_wall": {
     "name": "Shield Wall",
     "damage_type": "physical",
+    "damage_calc": "strength",
+    "animation_style": "aura",
     "base_damage": 0,
     "range": 0,
     "effect": "heavy_shield",
@@ -101,6 +120,8 @@
   "golden_beam": {
     "name": "Golden Beam",
     "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "beam",
     "base_damage": 95,
     "range": 10,
     "effect": "stun",
@@ -110,6 +131,7 @@
   "diamond_shard": {
     "name": "Diamond Shard",
     "damage_type": "magic",
+    "damage_calc": "magic",
     "base_damage": 80,
     "range": 8,
     "effect": "pierce",
@@ -119,6 +141,8 @@
   "swirling_roots": {
     "name": "Swirling Roots",
     "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "burst",
     "base_damage": 70,
     "range": 6,
     "effect": "knockback, slow",
@@ -128,10 +152,24 @@
   "stinky_fart": {
     "name": "Stinky Fart",
     "damage_type": "physical",
+    "damage_calc": "attack",
     "base_damage": 0,
     "range": 100,
     "effect": "stinky",
-    "cooldown": 0,
+    "cooldown": 2,
     "element": "stink"
+  },
+  "tether_lash": {
+    "name": "Tether Lash",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "beam",
+    "base_damage": 25,
+    "range": 999,
+    "effect": "slow",
+    "cooldown": 0,
+    "element": "void",
+    "distance_threshold": 8,
+    "distance_bonus_per_tile": 10
   }
 }
