@@ -157,6 +157,7 @@ class Character:
         self.fire_shield_damage = 8
         self.xp_reward = 0
         self.movement_lock_frames = 0
+        self.counter_turns = 0
         
     def set_attack_loadout(self, attack_ids: List[str]):
         self.attack_ids = attack_ids
@@ -254,6 +255,8 @@ class Character:
         for attack_id, turns in self.cooldowns.items():
             if turns > 0:
                 self.cooldowns[attack_id] = turns - 1
+        if self.counter_turns > 0:
+                self.counter_turns -= 1
 
 # Attack damage calculations (from damage-calc.py)
 def attack1(strength=0.0, **kwargs):
@@ -763,22 +766,31 @@ class Game:
             self.active_attack_cutscene = None
 
     def _attack_element_color(self, element: str) -> tuple[int, int, int]:
-        return {
-            "water": (80, 180, 255),
-            "lightning": (255, 245, 120),
-            "earth": (170, 120, 70),
-            "wind": (180, 240, 220),
-            "fire": (255, 120, 70),
-            "ice": (170, 240, 255),
-            "nature": (110, 220, 110),
+        palette = {
+            "water":    (80, 180, 255),
+            "lightning":(255, 245, 120),
+            "earth":    (170, 120, 70),
+            "wind":     (180, 240, 220),
+            "fire":     (255, 120, 70),
+            "ice":      (170, 240, 255),
+            "nature":   (110, 220, 110),
             "physical": (235, 235, 235),
-            "metal": (195, 205, 225),
-            "crystal": (160, 255, 245),
-            "stink": (150, 190, 70),
-            "void": (170, 110, 220),
-            "neutral": (225, 225, 225),
-        }.get(str(element).lower(), WHITE)
-
+            "metal":    (195, 205, 225),
+            "crystal":  (160, 255, 245),
+            "stink":    (150, 190, 70),
+            "void":     (170, 110, 220),
+            "neutral":  (225, 225, 225),
+        }
+        parts = [p.strip().lower() for p in element.replace("/", ",").split(",") if p.strip()]
+        colors = [palette.get(p, WHITE) for p in parts]
+        if len(colors) == 1:
+            return colors[0]
+        # Pulse between the two colors over time
+        t = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 180)
+        r = int(colors[0][0] * (1 - t) + colors[1][0] * t)
+        g = int(colors[0][1] * (1 - t) + colors[1][1] * t)
+        b = int(colors[0][2] * (1 - t) + colors[1][2] * t)
+        return (r, g, b)
     def _draw_cutscene_actor(self, character: Character, center_x: float, center_y: float, alpha: int = 220):
         draw_x = int(center_x - character.width / 2)
         draw_y = int(center_y - character.height / 2)
@@ -924,6 +936,30 @@ class Game:
                 self.screen.blit(frame_surface, (frame_x, frame_y))
             return
 
+        if style == "shard":
+            num_shards = 5
+            shard_progress = min(1.0, progress / 0.8)
+            dx = end_x - start_x
+            dy = end_y - start_y
+            base_angle = math.atan2(dy, dx)
+            for i in range(num_shards):
+                spread = math.radians((i - num_shards // 2) * 14)
+                angle = base_angle + spread
+                dist = math.hypot(dx, dy) * shard_progress
+                shard_x = start_x + math.cos(angle) * dist
+                shard_y = start_y + math.sin(angle) * dist
+                tip   = (shard_x + math.cos(angle) * 13,        shard_y + math.sin(angle) * 13)
+                left  = (shard_x + math.cos(angle + 2.4) * 7,   shard_y + math.sin(angle + 2.4) * 7)
+                right = (shard_x + math.cos(angle - 2.4) * 7,   shard_y + math.sin(angle - 2.4) * 7)
+                pygame.draw.polygon(self.screen, effect_color, [tip, left, right])
+                pygame.draw.polygon(self.screen, WHITE, [tip, left, right], 1)
+            if progress > 0.75:
+                impact_radius = int(10 + (progress - 0.75) * 60)
+                pygame.draw.circle(self.screen, effect_color, (int(end_x), int(end_y)), impact_radius, 3)
+            if frame_surface:
+                self.screen.blit(frame_surface, (int(end_x - frame_surface.get_width() / 2),
+                                                int(end_y - frame_surface.get_height() / 2)))
+            return
         if style == "burst":
             burst_progress = 0.2 + 0.8 * progress
             impact_x = start_x + (end_x - start_x) * burst_progress
@@ -1359,6 +1395,14 @@ class Game:
         if event.key in [pygame.K_DOWN, pygame.K_s]:
             self.inventory_selection = (self.inventory_selection + 1) % len(inventory_ids)
             return
+        if event.key == pygame.K_u:
+            inventory_ids = self._inventory_item_ids()
+            if inventory_ids:
+                selected_item = inventory_ids[self.inventory_selection]
+                slot_name = self._equipment_slot_for_item(selected_item)
+                if slot_name and self.equipment_slots.get(slot_name):
+                    self._unequip_item(slot_name)
+            return
         if event.key not in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_e]:
             return
 
@@ -1444,7 +1488,7 @@ class Game:
             row_text = self.font_small.render(row, True, WHITE)
             self.screen.blit(row_text, (left_x, equipment_y + 30 + i * 26))
 
-        hint_text = self.font_small.render("I/Esc close, W/S move, Enter/Space use or equip", True, GRAY)
+        hint_text = self.font_small.render("I/Esc close, W/S move, Enter/Space equip/use, U unequip slot", True, GRAY)
         self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 46))
 
     def _add_item_to_inventory(self, item_id: str, amount: int = 1):
@@ -1665,6 +1709,16 @@ class Game:
                         self._message(f"{attacker.name} is hurt by the disgusting stink ({stink_damage:.0f} damage)", 150)
                 else:
                     self._message(f"{attacker.name} lets out a terrible stink", 120)
+            elif effect == "pull":
+                self._apply_knockback(target, attacker)  # swap attacker/target!
+                self._message(f"{target.name} was pulled in!", 120)
+            elif effect == "burn_aura":
+                attacker.fire_shield_turns = max(attacker.fire_shield_turns, 5)
+                attacker.fire_shield_damage = 20  # hits harder than default 8
+                self._message(f"{attacker.name} is coated in magma! Attackers will burn!", 150)
+            elif effect == "counter":
+                attacker.counter_turns = 2
+                self._message(f"{attacker.name} takes a counter stance!", 150)
 
     def _begin_turn(self, actor: Character, opponent: Character, is_player_turn: bool) -> bool:
         if actor.has_status("burn"):
@@ -1741,10 +1795,15 @@ class Game:
             damage *= 0.75
         ignore_defense = "pierce" in effect_names
         if is_self_buff:
-            actual_damage = 0
-            was_dodged = False
+                actual_damage = 0
+                was_dodged = False
         else:
             actual_damage, was_dodged = target.take_damage(damage, ignore_defense=ignore_defense)
+            if actual_damage > 0 and target.counter_turns > 0:
+                counter_damage = actual_damage * 2
+                reflected, _ = attacker.take_damage(counter_damage, ignore_defense=True)
+                target.counter_turns = 0
+                self._message(f"{target.name} counters for {reflected:.0f} damage!", 150)
         if attack_id != INSTINCT_ATTACK_ID:
             attacker.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
         

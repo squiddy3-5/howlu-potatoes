@@ -59,7 +59,7 @@
         "attack": 80,
         "magic_ability": 50,
         "defense": 100,
-        "speed": 30,
+        "speed": 50,
         "max_hp": 250
       },
       "preset_attack": "striking_hit",

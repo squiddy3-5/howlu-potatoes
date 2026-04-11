@@ -58,11 +58,12 @@
     "name": "Ice Shard",
     "damage_type": "magic",
     "damage_calc": "magic",
+    "animation_style": "shard",
     "base_damage": 35,
     "range": 8,
     "effect": "freeze",
     "cooldown": 3,
-    "element": "ice"
+    "element": "ice, crystal"
   },
   "grass_knot": {
     "name": "Grass Knot",
@@ -133,6 +134,7 @@
     "name": "Diamond Shard",
     "damage_type": "magic",
     "damage_calc": "magic",
+    "animation_style": "shard",
     "base_damage": 80,
     "range": 8,
     "effect": "pierce",
@@ -172,5 +174,83 @@
     "element": "void",
     "distance_threshold": 8,
     "distance_bonus_per_tile": 10
-  }
+  },
+  "glacial_spike": {
+    "name": "Glacial Spike",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "projectile",
+    "base_damage": 120,
+    "range": 10,
+    "effect": "freeze, wounded",
+    "cooldown": 5,
+    "element": "ice, crystal",
+    "level_bonus": 8
+},
+"magma_coat": {
+    "name": "Magma Coat",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "aura",
+    "base_damage": 0,
+    "range": 0,
+    "effect": "fire_shield, burn_aura",
+    "cooldown": 4,
+    "element": "fire, earth"
+},
+"void_pull": {
+    "name": "Void Pull",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "beam",
+    "base_damage": 30,
+    "range": 12,
+    "effect": "pull",
+    "cooldown": 2,
+    "element": "void"
+},
+"petal_storm": {
+    "name": "Petal Storm",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "burst",
+    "base_damage": 55,
+    "range": 6,
+    "effect": "slow, wounded",
+    "cooldown": 3,
+    "element": "nature, wind"
+},
+"counter_stance": {
+    "name": "Counter Stance",
+    "damage_type": "physical",
+    "damage_calc": "strength",
+    "animation_style": "aura",
+    "base_damage": 0,
+    "range": 0,
+    "effect": "counter",
+    "cooldown": 3,
+    "element": "physical"
+},
+"cursed_bite": {
+    "name": "Cursed Bite",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "rush",
+    "base_damage": 15,
+    "range": 3,
+    "effect": "wounded, burn, slow",
+    "cooldown": 3,
+    "element": "void"
+},
+"magma_freeze": {
+    "name": "Magma Freeze",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "burst",
+    "base_damage": 45,
+    "range": 7,
+    "effect": "burn, freeze",
+    "cooldown": 4,
+    "element": "fire, ice"
+}
 }
