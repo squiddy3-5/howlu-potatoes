@@ -72,7 +72,7 @@ GRAY = (128, 128, 128)
 DARK_RED = (139, 0, 0)
 
 ATTACK_CHOICE_TIME_MS = 10000
-GAME_VERSION = "0.10"
+GAME_VERSION = "0.11"
 INSTINCT_ATTACK_ID = "instinct_strike"
 INSTINCT_ATTACK = {
     "name": "Instinct Strike",
@@ -1329,6 +1329,16 @@ class Game:
         self._apply_equipment_bonus(item_id, 1)
         self._message(f"Equipped {items[item_id]['name']} to {slot_name}.", 180)
         return True
+    def _unequip_item(self, slot_name: str) -> bool:
+        item_id = self.equipment_slots.get(slot_name)
+        if not item_id:
+            self._message(f"Nothing equipped in {slot_name}.", 150)
+            return False
+        self._apply_equipment_bonus(item_id, -1)
+        self.equipment_slots[slot_name] = None
+        self.inventory[item_id] = self.inventory.get(item_id, 0) + 1
+        self._message(f"Unequipped {items[item_id]['name']} from {slot_name}.", 180)
+        return True
 
     def _use_consumable_item(self, item_id: str) -> bool:
         if not self.player or self.inventory.get(item_id, 0) <= 0:
@@ -1387,6 +1397,11 @@ class Game:
         if event.key in [pygame.K_ESCAPE, pygame.K_i]:
             self._close_inventory()
             return
+        if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
+            slot_names = ["helmet", "armor", "accessory", "relic"]
+            slot_index = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4].index(event.key)
+            self._unequip_item(slot_names[slot_index])
+            return
         if not inventory_ids:
             return
         if event.key in [pygame.K_UP, pygame.K_w]:
@@ -1395,15 +1410,9 @@ class Game:
         if event.key in [pygame.K_DOWN, pygame.K_s]:
             self.inventory_selection = (self.inventory_selection + 1) % len(inventory_ids)
             return
-        if event.key == pygame.K_u:
-            inventory_ids = self._inventory_item_ids()
-            if inventory_ids:
-                selected_item = inventory_ids[self.inventory_selection]
-                slot_name = self._equipment_slot_for_item(selected_item)
-                if slot_name and self.equipment_slots.get(slot_name):
-                    self._unequip_item(slot_name)
-            return
-        if event.key not in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_e]:
+    
+        
+        if event.key not in [pygame.K_RETURN, pygame.K_SPACE]:
             return
 
         selected_item = inventory_ids[self.inventory_selection]
@@ -1488,7 +1497,7 @@ class Game:
             row_text = self.font_small.render(row, True, WHITE)
             self.screen.blit(row_text, (left_x, equipment_y + 30 + i * 26))
 
-        hint_text = self.font_small.render("I/Esc close, W/S move, Enter/Space equip/use, U unequip slot", True, GRAY)
+        hint_text = self.font_small.render("I/Esc close, Up/Down move, Enter/Space to use item, Click 1-4 to unequip slots", True, GRAY)
         self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 46))
 
     def _add_item_to_inventory(self, item_id: str, amount: int = 1):
