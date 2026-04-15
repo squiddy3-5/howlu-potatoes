@@ -71,6 +71,114 @@
     "cooldown": 3,
     "element": "ice, crystal"
   },
+  "fire_shard": {
+    "name": "Fire Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/fireShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "burn",
+    "cooldown": 3,
+    "element": "fire, crystal"
+  },
+  "wind_shard": {
+    "name": "Wind Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/windShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "wounded",
+    "cooldown": 3,
+    "element": "wind, crystal"
+  },
+  "earth_shard": {
+    "name": "Earth Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/earthShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "slow",
+    "cooldown": 3,
+    "element": "earth, crystal"
+  },
+  "lightning_shard": {
+    "name": "Lightning Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/lightningShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "stun",
+    "cooldown": 3,
+    "element": "lightning, crystal"
+  },
+  "water_shard": {
+    "name": "Water Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/waterShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "freeze",
+    "cooldown": 3,
+    "element": "water, crystal"
+  },
+  "metal_shard": {
+    "name": "Metal Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/metalShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "light shield",
+    "cooldown": 3,
+    "element": "metal, crystal"
+  },
+  "nature_shard": {
+    "name": "Nature Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/natureShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "slow",
+    "cooldown": 3,
+    "element": "nature, crystal"
+  },
+  "crystal_shard": {
+    "name": "Crystal Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/crystalShard.png",
+    "base_damage": 35,
+    "range": 8,
+    "effect": "slow, pierce",
+    "cooldown": 3,
+    "element": "crystal"
+  },
+  "potato_shard": {
+    "name": "Potato Shard",
+    "damage_type": "magic",
+    "damage_calc": "magic",
+    "animation_style": "shard",
+    "animation_image": "attack_gifs/potatoShard.png",
+    "base_damage": 50,
+    "range": 8,
+    "effect": "gravy_ward, mirror_peel",
+    "cooldown": 3,
+    "element": "potato, crystal"
+  },
   "grass_knot": {
     "name": "Grass Knot",
     "damage_type": "magic",
@@ -300,7 +408,7 @@
     "range": 0,
     "effect": "potato_mine",
     "cooldown": 1,
-    "element": "earth",
+    "element": "earth, potato",
     "mine_damage": 100
 },
 "mirror_peel": {
@@ -364,7 +472,7 @@
     "range": 7,
     "effect": "hot_potato",
     "cooldown": 4,
-    "element": "fire, earth",
+    "element": "fire, earth, potato",
     "delay_turns": 2,
     "delayed_damage": 120
 },
@@ -439,5 +547,18 @@
     "effect": "freeze, wounded, knockback",
     "cooldown": 5,
     "element": "ice, metal"
+},
+"super_test_attack":{
+  "name": "Super Test Attack",
+  "damage_type": "magic",
+  "damage_calc": "magic",
+  "animation_style": "shockwave",
+  "base_damage": 30,
+  "range": 10,
+  "effect": "burn, stun, freeze, wounded, slow, knockback, pierce, potato_mine, crumb_bomb, hot_potato",
+  "cooldown": 1,
+  "element": "void, water, fire, ice, nature, lightning, earth, metal, crystal,"
+
 }
 }
+

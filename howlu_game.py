@@ -404,7 +404,7 @@ def parse_type_list(value) -> List[str]:
     return unique_parts or ["neutral"]
 
 class GameMessage:
-    def __init__(self, text: str, duration: int = 240):
+    def __init__(self, text: str, duration: int = 600):
         self.text = text
         self.duration = duration
         self.age = 0
@@ -414,7 +414,14 @@ class GameMessage:
         return self.age < self.duration
     
     def draw(self, surface, font, y_offset: int, x_offset: int = 50, max_width: Optional[int] = None) -> int:
-        alpha = max(0, min(255, int(255 * (1 - (self.age / self.duration)))))
+        fade_start = 0.7  # 70% of lifetime before fading
+        progress = self.age / self.duration
+
+        if progress < fade_start:
+            alpha = 255
+        else:
+            fade_progress = (progress - fade_start) / (1 - fade_start)
+            alpha = int(255 * (1 - fade_progress))
         lines = [self.text]
         if max_width:
             lines = []

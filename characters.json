@@ -179,7 +179,8 @@
         "boiling_tide",
         "iron_maelstrom",
         "spore_catapult",
-        "frostfall_comet"
+        "frostfall_comet",
+        "super_test_attack"
     ],
     "color": [255, 0, 255],
     "sprite_file": "characters/howlu.png"
@@ -519,7 +520,7 @@
       "stats": {
         "strength": 82,
         "attack": 78,
-        "magic_ability": 120,
+        "magic_ability": 1200,
         "defense": 44,
         "speed": 72,
         "max_hp": 610
