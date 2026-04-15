@@ -1,0 +1,38 @@
+{
+  "npcs": [
+    {
+      "id": "merchant",
+      "name": "Merchant",
+      "map_id": "starting_town",
+      "grid_x": 14,
+      "grid_y": 18,
+      "color": [255, 200, 50],
+      "dialogue": [
+        "Welcome, big stink!",
+        "I have wares if you dont have gold. haha"
+      ],
+      "shop": [
+        {"item_id": "small_potion", "price": 1},
+        {"item_id": "large_potion", "price": 1},
+        {"item_id": "spark_tonic", "price": 1},
+        {"item_id": "iron_bark", "price": 1},
+        {"item_id": "fire_potion", "price": 1},
+        {"item_id":"king_crab_helmet", "price": 1},
+        {"item_id": "iron_armor", "price": 1}
+      ]
+    },
+    {
+      "id": "villager",
+      "name": "Villager",
+      "map_id": "starting_town",
+      "grid_x": 18,
+      "grid_y": 12,
+      "color": [150, 200, 150],
+      "dialogue": [
+        "Beware the forest...",
+        "Strange creatures lurk there."
+      ],
+      "shop": []
+    }
+  ]
+}

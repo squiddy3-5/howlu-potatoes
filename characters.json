@@ -4,6 +4,7 @@
       "id": "howlu",
       "name": "Poop Head",
       "description": "Stonky fighter",
+      "types": ["water", "physical"],
       "stats": {
         "strength": 660,
         "attack": 660,
@@ -29,6 +30,7 @@
       "id": "fire_log",
       "name": "Calcifer",
       "description": "High magic, low defense",
+      "types": ["fire", "wind"],
       "stats": {
         "strength": 30,
         "attack": 35,
@@ -54,6 +56,7 @@
       "id": "roast_radish",
       "name": "Radish Head",
       "description": "High defense, slower",
+      "types": ["earth", "metal"],
       "stats": {
         "strength": 80,
         "attack": 80,
@@ -79,6 +82,7 @@
       "id": "sophie",
       "name": "Saphie",
       "description": "Well rounded",
+      "types": ["crystal", "nature"],
       "stats": {
         "strength": 95,
         "attack": 95,
@@ -104,6 +108,7 @@
       "id": "stinky",
       "name": "Worst Character",
       "description": "Balanced with maxed out loser-ness",
+      "types": ["stink"],
       "stats": {
         "strength": 1,
         "attack": 1,
@@ -124,18 +129,85 @@
         0
       ],
       "sprite_file": "characters/stinky.png"
-    }
+    },
+    {
+    "id": "tester",
+    "name": "Test Character",
+    "description": "Has every attack for testing",
+    "types": ["void", "crystal"],
+    "stats": {
+        "strength": 500,
+        "attack": 500,
+        "magic_ability": 500,
+        "defense": 500,
+        "speed": 100,
+        "max_hp": 9999
+    },
+    "attack_ids": [
+        "water_blast",
+        "lightning_strike",
+        "earth_shock",
+        "wind_blade",
+        "fireball",
+        "ice_shard",
+        "grass_knot",
+        "striking_hit",
+        "shield_bash",
+        "round_sweep",
+        "shield_wall",
+        "golden_beam",
+        "diamond_shard",
+        "swirling_roots",
+        "stinky_fart",
+        "tether_lash",
+        "glacial_spike",
+        "magma_coat",
+        "void_pull",
+        "petal_storm",
+        "counter_stance",
+        "cursed_bite",
+        "magma_freeze",
+        "cooldown_drain",
+        "potato_mine",
+        "mirror_peel",
+        "steam_burst",
+        "crumb_bomb",
+        "gravy_ward",
+        "hot_potato",
+        "royal_decree",
+        "abyssal_anchor",
+        "boiling_tide",
+        "iron_maelstrom",
+        "spore_catapult",
+        "frostfall_comet"
+    ],
+    "color": [255, 0, 255],
+    "sprite_file": "characters/howlu.png"
+}
   ],
   "enemies": [
     {
       "id": "paella_servant",
       "name": "Paella Servant",
+      "description": "A scrappy kitchen minion that fights with brute force and terrible manners.",
+      "types": ["physical", "earth"],
       "xp_reward": 20,
-      "stats_multiplier": 0.8,
+      "stats": {
+        "strength": 35,
+        "attack": 40,
+        "magic_ability": 20,
+        "defense": 12,
+        "speed": 48,
+        "max_hp": 120
+      },
       "color": [
         200,
         100,
         100
+      ],
+      "attack_ids": [
+        "striking_hit",
+        "round_sweep"
       ],
       "drop_pool": [
         "small_potion",
@@ -150,18 +222,209 @@
     {
       "id": "paella_monster",
       "name": "Paella Monster",
+      "description": "A greasy arena bruiser that shoves foes around and lobs dangerous potatoes.",
+      "types": ["fire", "physical"],
       "xp_reward": 100,
-      "stats_multiplier": 1.2,
+      "stats": {
+        "strength": 75,
+        "attack": 70,
+        "magic_ability": 38,
+        "defense": 26,
+        "speed": 62,
+        "max_hp": 260
+      },
       "color": [
         220,
         50,
         50
       ],
+      "attack_ids": [
+        "round_sweep",
+        "shield_bash",
+        "hot_potato"
+      ],
       "drop_pool": [
         "small_potion",
         "large_potion",
         "iron_bark",
-        "ember_seed"
+        "ember_seed",
+        "paella"
+      ],
+      "drop_count_range": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "ember_imp",
+      "name": "Ember Imp",
+      "description": "A hyper little flame pest that peppers you with heat and pressure.",
+      "types": ["fire", "wind"],
+      "xp_reward": 70,
+      "stats": {
+        "strength": 28,
+        "attack": 34,
+        "magic_ability": 82,
+        "defense": 14,
+        "speed": 84,
+        "max_hp": 170
+      },
+      "color": [
+        255,
+        120,
+        70
+      ],
+      "attack_ids": [
+        "fireball",
+        "steam_burst",
+        "hot_potato"
+      ],
+      "drop_pool": [
+        "small_potion",
+        "ember_seed",
+        "spark_tonic"
+      ],
+      "drop_count_range": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "bog_witch",
+      "name": "Bog Witch",
+      "description": "A swamp caster that twists time, warps distance, and steals your rhythm.",
+      "types": ["void", "water"],
+      "xp_reward": 120,
+      "stats": {
+        "strength": 22,
+        "attack": 28,
+        "magic_ability": 96,
+        "defense": 20,
+        "speed": 66,
+        "max_hp": 240
+      },
+      "color": [
+        130,
+        95,
+        170
+      ],
+      "attack_ids": [
+        "cooldown_drain",
+        "gravy_ward",
+        "void_pull",
+        "mirror_peel",
+        "abyssal_anchor"
+      ],
+      "drop_pool": [
+        "mystery_gravy",
+        "spark_tonic",
+        "large_potion"
+      ],
+      "drop_count_range": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "hedge_knight",
+      "name": "Hedge Knight",
+      "description": "A plated duelist who punishes reckless attacks and controls close range.",
+      "types": ["metal", "physical"],
+      "xp_reward": 150,
+      "stats": {
+        "strength": 88,
+        "attack": 80,
+        "magic_ability": 24,
+        "defense": 50,
+        "speed": 46,
+        "max_hp": 330
+      },
+      "color": [
+        155,
+        155,
+        170
+      ],
+      "attack_ids": [
+        "shield_wall",
+        "shield_bash",
+        "counter_stance",
+        "round_sweep",
+        "iron_maelstrom"
+      ],
+      "drop_pool": [
+        "iron_bark",
+        "large_potion",
+        "iron_helmet"
+      ],
+      "drop_count_range": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "crystal_sniper",
+      "name": "Crystal Sniper",
+      "description": "A long-range crystal hunter that thrives on spacing and precise shots.",
+      "types": ["crystal", "ice"],
+      "xp_reward": 180,
+      "stats": {
+        "strength": 26,
+        "attack": 34,
+        "magic_ability": 105,
+        "defense": 18,
+        "speed": 90,
+        "max_hp": 210
+      },
+      "color": [
+        120,
+        235,
+        255
+      ],
+      "attack_ids": [
+        "diamond_shard",
+        "golden_beam",
+        "mirror_peel",
+        "royal_decree"
+      ],
+      "drop_pool": [
+        "spark_tonic",
+        "swift_feather",
+        "lucky_potato"
+      ],
+      "drop_count_range": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "spore_brute",
+      "name": "Spore Brute",
+      "description": "A hulking fungus beast that floods the field with stink and hidden traps.",
+      "types": ["nature", "stink"],
+      "xp_reward": 160,
+      "stats": {
+        "strength": 92,
+        "attack": 86,
+        "magic_ability": 18,
+        "defense": 34,
+        "speed": 38,
+        "max_hp": 380
+      },
+      "color": [
+        120,
+        170,
+        90
+      ],
+      "attack_ids": [
+        "stinky_fart",
+        "potato_mine",
+        "round_sweep",
+        "spore_catapult"
+      ],
+      "drop_pool": [
+        "small_potion",
+        "iron_bark",
+        "mystery_gravy"
       ],
       "drop_count_range": [
         1,
@@ -171,12 +434,30 @@
     {
       "id": "easy_boss",
       "name": "Easy Boss",
+      "description": "A flashy commander who mixes defensive play with royal punishments.",
+      "types": ["crystal", "metal"],
       "xp_reward": 500,
-      "stats_multiplier": 1.5,
+      "stats": {
+        "strength": 110,
+        "attack": 105,
+        "magic_ability": 95,
+        "defense": 60,
+        "speed": 70,
+        "max_hp": 520
+      },
       "color": [
         200,
         0,
         200
+      ],
+      "attack_ids": [
+        "golden_beam",
+        "diamond_shard",
+        "shield_wall",
+        "counter_stance",
+        "cooldown_drain",
+        "royal_decree",
+        "iron_maelstrom"
       ],
       "drop_pool": [
         "large_potion",
@@ -192,12 +473,30 @@
     {
       "id": "hard_boss",
       "name": "Hard Boss",
+      "description": "A brutal late-game tyrant wielding frost, void pressure, and crushing force.",
+      "types": ["void", "ice"],
       "xp_reward": 1500,
-      "stats_multiplier": 2.0,
+      "stats": {
+        "strength": 155,
+        "attack": 150,
+        "magic_ability": 135,
+        "defense": 85,
+        "speed": 82,
+        "max_hp": 850
+      },
       "color": [
         255,
         100,
         0
+      ],
+      "attack_ids": [
+        "glacial_spike",
+        "magma_freeze",
+        "void_pull",
+        "hot_potato",
+        "counter_stance",
+        "abyssal_anchor",
+        "frostfall_comet"
       ],
       "drop_pool": [
         "large_potion",
@@ -214,12 +513,28 @@
     {
       "id": "boat_mom_easy",
       "name": "Boat Mom",
+      "description": "A seasoned water matron who controls the pace of battle with boiling waves.",
+      "types": ["water", "earth"],
       "xp_reward": 700,
-      "stats_multiplier": 1.8,
+      "stats": {
+        "strength": 82,
+        "attack": 78,
+        "magic_ability": 120,
+        "defense": 44,
+        "speed": 72,
+        "max_hp": 610
+      },
       "color": [
         100,
         150,
         255
+      ],
+      "attack_ids": [
+        "water_blast",
+        "steam_burst",
+        "gravy_ward",
+        "cooldown_drain",
+        "boiling_tide"
       ],
       "drop_pool": [
         "small_potion",
@@ -237,6 +552,27 @@
     {
       "id": "starting_town",
       "name": "Starting Town",
+      "entries": [
+        {
+          "id": "town_center",
+          "grid_x": 15,
+          "grid_y": 10
+        },
+        {
+          "id": "from_forest",
+          "grid_x": 28,
+          "grid_y": 10
+        }
+      ],
+      "exits": [
+        {
+          "grid_x": 29,
+          "grid_y": 10,
+          "target_map_id": "forest_path",
+          "target_entry_id": "from_town",
+          "label": "You head out toward the forest."
+        }
+      ],
       "layout": [
         "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
         "B............................B",
@@ -248,15 +584,15 @@
         "B............................B",
         "B............................B",
         "B............................B",
+        "B............................E",
         "B............................B",
         "B............................B",
         "B............................B",
         "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
+        "B.........NNNNNNNN...........B",
+        "B.........N......N...........B",
+        "B.........N..NN..N...........B",
+        "B.........N.NNNN.N...........B",
         "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
       ],
       "legend": {
@@ -270,12 +606,28 @@
     {
       "id": "forest_path",
       "name": "Forest Path",
+      "entries": [
+        {
+          "id": "from_town",
+          "grid_x": 1,
+          "grid_y": 10
+        }
+      ],
+      "exits": [
+        {
+          "grid_x": 0,
+          "grid_y": 10,
+          "target_map_id": "starting_town",
+          "target_entry_id": "from_forest",
+          "label": "You return to town."
+        }
+      ],
       "layout": [
         "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
         "T............................T",
         "T............................T",
         "T............................T",
-        "T............................T",
+        "E............................T",
         "T............................T",
         "T............................T",
         "T............................T",
@@ -297,7 +649,8 @@
         "B": "building",
         "P": "path",
         "W": "water",
-        "T": "tree"
+        "T": "tree",
+        "N": "enemies_noSpawn"
       }
     }
   ]
