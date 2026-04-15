@@ -1,4 +1,4 @@
-the#%%%%%%%%%%
+#%%%%%%%%%%
 
 def attack1(strength=0.0, **kwargs):
     # 1. strength/5
