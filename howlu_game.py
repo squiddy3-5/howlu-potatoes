@@ -99,8 +99,9 @@ TYPE_CHART = {
     "nature": {"water": 2.0, "lightning": 2.0, "earth": 2.0},
     "physical": {"fire": 2.0, "ice": 2.0, "metal": 2.0},
     "metal": {"water": 2.0, "lightning": 2.0, "earth": 2.0, "wind": 2.0, "fire": 2.0, "ice": 2.0, "nature": 2.0},
-    "stink": {"water": 0.5, "lightning": 0.5, "earth": 0.5, "wind": 0.5, "fire": 0.5, "ice": 0.5, "crystal": 0.5, "nature": 0.5, "physical": 0.5, "metal": 0.5, "stink": 0.5, "void": 0.5},
-    "void": {"water": 1.25, "lightning": 1.25, "earth": 1.25, "wind": 1.25, "fire": 1.25, "ice": 1.25, "crystal": 1.25, "nature": 1.25, "physical": 1.25, "metal": 1.25, "stink": 1.25, "void": 2.0},
+    "potato": {"water": 2.0, "lightning": 2.0, "void": 2.0, "stink": 2.0},
+    "stink": {"water": 0.5, "lightning": 0.5, "earth": 0.5, "wind": 0.5, "fire": 0.5, "ice": 0.5, "crystal": 0.5, "nature": 0.5, "physical": 0.5, "metal": 0.5, "potato": 0.5, "stink": 0.5, "void": 0.5},
+    "void": {"water": 1.25, "lightning": 1.25, "earth": 1.25, "wind": 1.25, "fire": 1.25, "ice": 1.25, "crystal": 1.25, "nature": 1.25, "physical": 1.25, "metal": 1.25, "potato": 1.25, "stink": 1.25, "void": 2.0},
     "neutral": {},
 }
 INSTINCT_ATTACK_ID = "instinct_strike"
@@ -402,6 +403,25 @@ def parse_type_list(value) -> List[str]:
         parts = [normalize_type_name(part) for part in str(value).replace("/", ",").split(",") if part.strip()]
     unique_parts = list(dict.fromkeys(parts))
     return unique_parts or ["neutral"]
+
+def type_badge_color(type_name: str) -> tuple[int, int, int]:
+    palette = {
+        "water": (70, 142, 255),
+        "lightning": (247, 214, 76),
+        "earth": (141, 104, 66),
+        "wind": (133, 219, 211),
+        "fire": (237, 102, 77),
+        "ice": (124, 207, 242),
+        "crystal": (187, 133, 255),
+        "nature": (101, 185, 103),
+        "physical": (186, 188, 198),
+        "metal": (124, 138, 162),
+        "potato": (176, 132, 66),
+        "stink": (156, 173, 82),
+        "void": (98, 82, 159),
+        "neutral": (110, 118, 138),
+    }
+    return palette.get(normalize_type_name(type_name), (110, 118, 138))
 
 class GameMessage:
     def __init__(self, text: str, duration: int = 600):
@@ -2250,15 +2270,21 @@ class Game:
 
     def _draw_bestiary_overlay(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 190))
+        overlay.fill((0, 0, 0, 182))
         self.screen.blit(overlay, (0, 0))
 
         box_width = 860
         box_height = 540
         box_x = SCREEN_WIDTH // 2 - box_width // 2
         box_y = SCREEN_HEIGHT // 2 - box_height // 2
-        pygame.draw.rect(self.screen, (30, 32, 48), (box_x, box_y, box_width, box_height))
-        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+        shadow_rect = pygame.Rect(box_x + 8, box_y + 8, box_width, box_height)
+        shadow = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        shadow.fill((0, 0, 0, 0))
+        pygame.draw.rect(shadow, (0, 0, 0, 80), shadow.get_rect(), border_radius=6)
+        self.screen.blit(shadow, shadow_rect.topleft)
+        panel_rect = pygame.Rect(box_x, box_y, box_width, box_height)
+        pygame.draw.rect(self.screen, (34, 36, 56), panel_rect, border_radius=4)
+        pygame.draw.rect(self.screen, (236, 238, 246), panel_rect, 3, border_radius=4)
 
         title = self.font_large.render(f"{self._current_bestiary_title()}'s Bestiary", True, YELLOW)
         self.screen.blit(title, (box_x + 24, box_y + 20))
@@ -2295,8 +2321,12 @@ class Game:
         page_start = self.bestiary_page * page_size
         page_entries = self.enemy_data[page_start:page_start + page_size]
 
-        pygame.draw.rect(self.screen, (24, 26, 38), (list_x, list_y, list_width, list_height))
-        pygame.draw.rect(self.screen, (95, 95, 120), (list_x, list_y, list_width, list_height), 2)
+        list_rect = pygame.Rect(list_x, list_y, list_width, list_height)
+        detail_rect = pygame.Rect(detail_x, list_y, detail_width, list_height)
+        pygame.draw.rect(self.screen, (28, 30, 46), list_rect)
+        pygame.draw.rect(self.screen, (124, 126, 160), list_rect, 2)
+        pygame.draw.rect(self.screen, (28, 30, 46), detail_rect)
+        pygame.draw.rect(self.screen, (124, 126, 160), detail_rect, 2)
 
         for page_offset, enemy in enumerate(page_entries):
             enemy_index = page_start + page_offset
@@ -2304,38 +2334,54 @@ class Game:
             seen = enemy_id in self.bestiary_seen
             selected = enemy_index == self.bestiary_selection
             row_rect = pygame.Rect(list_x + 8, list_y + 8 + page_offset * (row_height + 8), list_width - 16, row_height)
-            row_fill = (60, 66, 92) if selected else (36, 38, 52)
-            pygame.draw.rect(self.screen, row_fill, row_rect)
-            pygame.draw.rect(self.screen, YELLOW if selected else (90, 90, 110), row_rect, 2)
+            row_fill = (71, 78, 112) if selected else (42, 44, 61)
+            pygame.draw.rect(self.screen, row_fill, row_rect, border_radius=2)
+            pygame.draw.rect(self.screen, (255, 246, 78) if selected else (99, 102, 130), row_rect, 2, border_radius=2)
             enemy_name = enemy.get("name", "Unknown") if seen else "???"
             type_label = "/".join(parse_type_list(enemy.get("types"))) if seen else "???"
-            name_surface = self.font_small.render(enemy_name, True, WHITE if selected else GRAY)
-            type_surface = self.font_small.render(type_label, True, YELLOW if seen else GRAY)
+            wrapped_name = self._wrap_text_lines(self.font_small, enemy_name, row_rect.width - 20)
+            name_surface = self.font_small.render(wrapped_name[0] if wrapped_name else enemy_name, True, WHITE if selected else (228, 230, 238))
+            type_surface = self.font_small.render(type_label, True, (255, 230, 118) if seen else GRAY)
             self.screen.blit(name_surface, (row_rect.x + 10, row_rect.y + 8))
             self.screen.blit(type_surface, (row_rect.x + 10, row_rect.y + 28))
 
         selected_enemy = self.enemy_data[self.bestiary_selection] if self.enemy_data else None
-        pygame.draw.rect(self.screen, (24, 26, 38), (detail_x, list_y, detail_width, list_height))
-        pygame.draw.rect(self.screen, (95, 95, 120), (detail_x, list_y, detail_width, list_height), 2)
         if selected_enemy:
             enemy_id = selected_enemy.get("id", "")
             seen = enemy_id in self.bestiary_seen
             name_text = selected_enemy.get("name", "Unknown") if seen else "???"
-            types_text = ", ".join(parse_type_list(selected_enemy.get("types"))) if seen else "???"
             hp_text = selected_enemy.get("stats", {}).get("max_hp", selected_enemy.get("max_hp", "???")) if seen else "???"
             attack_count = len(selected_enemy.get("attack_ids", selected_enemy.get("attack_pool", []))) if seen else "?"
             defeats = self.bestiary_counts.get(enemy_id, 0)
             description = selected_enemy.get("description", "No notes yet.") if seen else "A hidden entry. Defeat this foe to reveal it."
+            display_types = parse_type_list(selected_enemy.get("types")) if seen else []
 
             detail_title = self.font_large.render(name_text, True, YELLOW if seen else GRAY)
             self.screen.blit(detail_title, (detail_x + 16, list_y + 16))
+            badge_x = detail_x + 16
+            badge_y = list_y + 52
+            if display_types:
+                for type_name in display_types:
+                    label = type_name.title()
+                    badge_surface = self.font_small.render(label, True, WHITE)
+                    badge_width = badge_surface.get_width() + 18
+                    badge_rect = pygame.Rect(badge_x, badge_y, badge_width, 24)
+                    pygame.draw.rect(self.screen, type_badge_color(type_name), badge_rect, border_radius=12)
+                    pygame.draw.rect(self.screen, (245, 246, 252), badge_rect, 1, border_radius=12)
+                    self.screen.blit(badge_surface, (badge_x + 9, badge_y + 3))
+                    badge_x += badge_width + 8
+            else:
+                unknown_badge = self.font_small.render("Unknown Type", True, GRAY)
+                self.screen.blit(unknown_badge, (badge_x, badge_y + 2))
+
+            divider_y = list_y + 92
+            pygame.draw.line(self.screen, (94, 97, 126), (detail_x + 16, divider_y), (detail_x + detail_width - 16, divider_y), 1)
             stat_lines = [
-                f"Types: {types_text}",
                 f"HP: {hp_text}",
                 f"Moves: {attack_count}",
                 f"Defeated: {defeats}",
             ]
-            stat_y = list_y + 58
+            stat_y = divider_y + 14
             for line in stat_lines:
                 stat_surface = self.font_small.render(line, True, WHITE if seen else GRAY)
                 self.screen.blit(stat_surface, (detail_x + 16, stat_y))

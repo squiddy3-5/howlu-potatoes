@@ -108,7 +108,7 @@
       "id": "stinky",
       "name": "Worst Character",
       "description": "Balanced with maxed out loser-ness",
-      "types": ["stink"],
+      "types": ["stink", "potato"],
       "stats": {
         "strength": 1,
         "attack": 1,
@@ -134,7 +134,7 @@
     "id": "tester",
     "name": "Test Character",
     "description": "Has every attack for testing",
-    "types": ["void", "crystal"],
+    "types": ["void", "crystal", "potato"],
     "stats": {
         "strength": 500,
         "attack": 500,
@@ -224,7 +224,7 @@
       "id": "paella_monster",
       "name": "Paella Monster",
       "description": "A greasy arena bruiser that shoves foes around and lobs dangerous potatoes.",
-      "types": ["fire", "physical"],
+      "types": ["fire", "physical", "potato"],
       "xp_reward": 100,
       "stats": {
         "strength": 75,
@@ -401,7 +401,7 @@
       "id": "spore_brute",
       "name": "Spore Brute",
       "description": "A hulking fungus beast that floods the field with stink and hidden traps.",
-      "types": ["nature", "stink"],
+      "types": ["nature", "stink", "potato"],
       "xp_reward": 160,
       "stats": {
         "strength": 92,
@@ -515,7 +515,7 @@
       "id": "boat_mom_easy",
       "name": "Boat Mom",
       "description": "A seasoned water matron who controls the pace of battle with boiling waves.",
-      "types": ["water", "earth"],
+      "types": ["water", "earth", "potato"],
       "xp_reward": 700,
       "stats": {
         "strength": 82,
