@@ -546,7 +546,51 @@
     "range": 10,
     "effect": "freeze, wounded, knockback",
     "cooldown": 5,
+    "charge_turns": 1,
     "element": "ice, metal"
+},
+  "scorch_tribute": {
+  "name": "Scorch Tribute",
+  "damage_type": "magic",
+  "damage_calc": "magic",
+  "animation_style": "void_tear",
+  "animation_image": "attack_gifs/cursedBite.png",
+  "base_damage": 112,
+  "range": 7,
+  "effect": "wounded, burn",
+  "cooldown": 4,
+  "self_damage": 45,
+  "element": "void, fire"
+},
+"rift_bloom": {
+  "name": "Rift Bloom",
+  "damage_type": "magic",
+  "damage_calc": "magic",
+  "animation_style": "void_tear",
+  "animation_image": "attack_gifs/voidPull.png",
+  "base_damage": 20,
+  "range": 8,
+  "effect": "arena_hazard, slow",
+  "cooldown": 4,
+  "hazard_type": "void",
+  "hazard_count": 3,
+  "hazard_duration": 5,
+  "element": "void, nature"
+},
+"tidal_snare": {
+  "name": "Tidal Snare",
+  "damage_type": "magic",
+  "damage_calc": "magic",
+  "animation_style": "steam_cloud",
+  "animation_image": "attack_gifs/waterSplash.png",
+  "base_damage": 16,
+  "range": 8,
+  "effect": "arena_hazard, slow",
+  "cooldown": 4,
+  "hazard_type": "water",
+  "hazard_count": 3,
+  "hazard_duration": 5,
+  "element": "water, earth"
 },
 "super_test_attack":{
   "name": "Super Test Attack",
@@ -561,4 +605,3 @@
 
 }
 }
-

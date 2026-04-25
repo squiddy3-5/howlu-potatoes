@@ -5,6 +5,7 @@ import random
 import math
 import json
 import os
+import time
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, List, Dict
@@ -199,6 +200,17 @@ class Character:
         self.gravy_ward_heal = 18
         self.hot_potato_turns = 0
         self.hot_potato_damage = 0
+        self.damage_bonus_multiplier = 1.0
+        self.armor_layers = 0
+        self.pending_charge_attack_id: Optional[str] = None
+        self.pending_charge_turns = 0
+        self.phase_index = 0
+        self.phase_thresholds_triggered: set[float] = set()
+        self.phase_attack_groups: List[List[str]] = []
+        self.is_elite = False
+        self.elite_title = ""
+        self.intent_data: Optional[Dict] = None
+        self.puzzle_sigils = 0
         
     def set_attack_loadout(self, attack_ids: List[str]):
         self.attack_ids = attack_ids
@@ -216,6 +228,10 @@ class Character:
         defense_total = self.stats.defense + self.defense_bonus
         defense_reduction = 0 if ignore_defense else defense_total / 10
         actual_damage = max(0, damage - defense_reduction)
+        if self.armor_layers > 0 and actual_damage > 0:
+            actual_damage *= 0.55
+            if actual_damage >= 24:
+                self.armor_layers = max(0, self.armor_layers - 1)
         if self.has_status("wounded"):
             actual_damage *= 1.5
         self.stats.current_hp = max(0, self.stats.current_hp - actual_damage)
@@ -604,6 +620,22 @@ class Game:
         self.enemy_turns_taken = 0
         self.bestiary_counts: Dict[str, int] = {}
         self.bestiary_seen: set[str] = set()
+        self.bestiary_elite_counts: Dict[str, int] = {}
+        self.bestiary_elite_seen: set[str] = set()
+        self.battle_terrain = "meadow"
+        self.battle_time_of_day = "day"
+        self.battle_round = 0
+        self.battle_event_turn = 0
+        self.active_hazards: List[Dict] = []
+        self.encounter_objective: Dict[str, object] = {"type": "defeat", "label": "Defeat the foe"}
+        self.pending_objective_victory = False
+        self.survive_turn_goal = 0
+        self.survive_turn_progress = 0
+        self.enemy_config_for_battle: Optional[Dict] = None
+        self.bosses_defeated: set[str] = set()
+        self.next_forced_boss_id: Optional[str] = None
+        self.active_sigils: List[Dict] = []
+        self.selected_battle_target = 0
         
         # Movement variables
         self.player_velocity = [0, 0]  # [vx, vy]
@@ -627,6 +659,13 @@ class Game:
         self.player_move_progress = 0.0
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
+        self.active_hazards = []
+        self.battle_round = 0
+        self.battle_event_turn = 0
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        self.enemy_config_for_battle = None
+        self.bosses_defeated = set()
+        self.next_forced_boss_id = None
         self.show_quit_confirm = False
         self.quit_confirm_choice = 1
         self.gold = 100
@@ -1625,7 +1664,7 @@ class Game:
     
     def create_random_enemy(self):
         """Create a random enemy from enemy data"""
-        enemy_config = random.choice(self.enemy_data)
+        enemy_config = self._select_enemy_config_for_encounter()
         
         # Create base stats for enemy, then let JSON override them directly.
         base_stats = {
@@ -1681,6 +1720,18 @@ class Game:
         self.bestiary_seen.add(self.enemy.character_id)
         self.bestiary_counts.setdefault(self.enemy.character_id, 0)
         self.enemy.defense_bonus = 0
+        self.enemy.pending_charge_attack_id = None
+        self.enemy.pending_charge_turns = 0
+        self.enemy.phase_thresholds_triggered = set()
+        self.enemy.puzzle_sigils = 0
+        self._setup_battle_encounter(enemy_config)
+        if self.next_forced_boss_id == enemy_config.get("id"):
+            self.next_forced_boss_id = None
+        else:
+            self._apply_elite_variant(enemy_config)
+        if self.enemy.is_elite:
+            self.bestiary_elite_seen.add(self.enemy.character_id)
+            self.bestiary_elite_counts.setdefault(self.enemy.character_id, 0)
         self.messages = []
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
@@ -1799,6 +1850,8 @@ class Game:
                     # Movement in battle
                     if event.key == pygame.K_i:
                         self._open_inventory()
+                    elif event.key == pygame.K_t:
+                        self._cycle_battle_target(1)
                     elif event.key == pygame.K_UP or event.key == pygame.K_w:
                         self.player_velocity[1] = -1
                     elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
@@ -1922,7 +1975,7 @@ class Game:
         dy = (attacker.y + attacker.height / 2) - (target.y + target.height / 2)
         return math.sqrt(dx ** 2 + dy ** 2) / TILE_SIZE
 
-    def _message(self, text: str, duration: int = 240):
+    def _message(self, text: str, duration: int = 320):
         self.messages.append(GameMessage(text, duration))
 
     def _current_bestiary_title(self) -> str:
@@ -1938,10 +1991,487 @@ class Game:
                 return (level, title, threshold)
         return None
 
+    def _current_battle_style(self) -> Dict[str, tuple]:
+        styles = {
+            "meadow": {"bg": (34, 45, 58), "floor": (54, 76, 82), "line": (124, 150, 158), "hazard": (98, 165, 104)},
+            "shore": {"bg": (28, 44, 66), "floor": (51, 78, 109), "line": (135, 180, 208), "hazard": (104, 184, 220)},
+            "forge": {"bg": (46, 34, 35), "floor": (82, 52, 49), "line": (192, 138, 118), "hazard": (232, 123, 84)},
+            "thicket": {"bg": (26, 39, 32), "floor": (47, 75, 54), "line": (118, 161, 122), "hazard": (146, 194, 104)},
+            "ruins": {"bg": (35, 37, 50), "floor": (61, 64, 83), "line": (155, 158, 181), "hazard": (214, 189, 111)},
+            "void": {"bg": (20, 18, 38), "floor": (43, 39, 78), "line": (127, 118, 204), "hazard": (160, 97, 229)},
+        }
+        return styles.get(self.battle_terrain, styles["meadow"])
+
+    def _time_of_day_from_clock(self) -> str:
+        hour = time.localtime().tm_hour
+        if 6 <= hour < 18:
+            return "day"
+        return "night"
+
+    def _terrain_theme_from_tile(self, terrain_tile: int) -> str:
+        mapping = {
+            TERRAIN_GRASS: "meadow",
+            TERRAIN_PATH: "ruins",
+            TERRAIN_WATER: "shore",
+            TERRAIN_BUILDING: "forge",
+            TERRAIN_TREE: "thicket",
+            TERRAIN_NOSPAWN: "void",
+            TERRAIN_EXIT: "ruins",
+        }
+        return mapping.get(terrain_tile, "meadow")
+
+    def _is_boss_enemy(self, enemy_config: Dict) -> bool:
+        enemy_id = str(enemy_config.get("id", "")).lower()
+        return "boss" in enemy_id or enemy_config.get("xp_reward", 0) >= 450
+
+    def _setup_battle_encounter(self, enemy_config: Dict):
+        current_tile = self.terrain_map[self.player_grid_y][self.player_grid_x]
+        self.battle_terrain = self._terrain_theme_from_tile(current_tile)
+        self.battle_time_of_day = self._time_of_day_from_clock()
+        self.battle_round = 0
+        self.battle_event_turn = random.randint(2, 4)
+        self.active_hazards = []
+        self.pending_objective_victory = False
+        self.enemy_config_for_battle = enemy_config
+        self.active_sigils = []
+        self.selected_battle_target = 0
+        enemy_id = str(enemy_config.get("id", "")).lower()
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        if enemy_id == "easy_boss":
+            self.encounter_objective = {"type": "break_armor", "label": "Break all armor plates"}
+            self.enemy.armor_layers = 3
+        elif enemy_id == "hard_boss":
+            self.encounter_objective = {
+                "type": "shatter_sigils",
+                "label": "Break the barrier anchors",
+                "allowed_types": ["crystal", "lightning", "potato"],
+            }
+            self._spawn_puzzle_sigils(3)
+            self.enemy.armor_layers = 2
+        elif enemy_id == "boat_mom_easy":
+            self.encounter_objective = {"type": "survive", "label": "Survive 4 enemy turns"}
+            self.survive_turn_goal = 4
+            self.survive_turn_progress = 0
+        else:
+            self.survive_turn_goal = 0
+            self.survive_turn_progress = 0
+
+    def _terrain_enemy_ids(self) -> Dict[str, List[str]]:
+        return {
+            "meadow": ["paella_servant", "paella_monster", "ember_imp"],
+            "shore": ["bog_witch", "boat_mom_easy", "ember_imp"],
+            "forge": ["hedge_knight", "crystal_sniper", "easy_boss"],
+            "thicket": ["spore_brute", "bog_witch", "paella_monster"],
+            "ruins": ["crystal_sniper", "hedge_knight", "easy_boss"],
+            "void": ["hard_boss", "bog_witch", "spore_brute"],
+        }
+
+    def _pending_boss_encounter_id(self) -> Optional[str]:
+        if not self.player:
+            return None
+        thresholds = [
+            (6, "easy_boss"),
+            (12, "boat_mom_easy"),
+            (22, "hard_boss"),
+        ]
+        for defeat_threshold, boss_id in thresholds:
+            if self.player.enemy_defeats >= defeat_threshold and boss_id not in self.bosses_defeated:
+                return boss_id
+        return None
+
+    def _select_enemy_config_for_encounter(self) -> Dict:
+        enemy_by_id = {enemy.get("id"): enemy for enemy in self.enemy_data}
+        pending_boss_id = self._pending_boss_encounter_id()
+        if pending_boss_id and pending_boss_id in enemy_by_id:
+            self.next_forced_boss_id = pending_boss_id
+            return enemy_by_id[pending_boss_id]
+
+        current_tile = self.terrain_map[self.player_grid_y][self.player_grid_x]
+        terrain_theme = self._terrain_theme_from_tile(current_tile)
+        preferred_ids = self._terrain_enemy_ids().get(terrain_theme, [])
+        terrain_pool = [
+            enemy for enemy in self.enemy_data
+            if enemy.get("id") in preferred_ids and not self._is_boss_enemy(enemy)
+        ]
+        if not terrain_pool:
+            terrain_pool = [enemy for enemy in self.enemy_data if not self._is_boss_enemy(enemy)]
+        if not terrain_pool:
+            terrain_pool = self.enemy_data[:]
+        return random.choice(terrain_pool)
+
+    def _apply_elite_variant(self, enemy_config: Dict):
+        if self._is_boss_enemy(enemy_config) or random.random() >= 0.12:
+            return
+        variant = random.choice([
+            ("Moonlit", "night", "void_pull", 1),
+            ("Brassbound", "forge", "shield_wall", 2),
+            ("Wildroot", "thicket", "swirling_roots", 1),
+            ("Stormtouched", "shore", "lightning_strike", 1),
+        ])
+        title, terrain_override, bonus_attack, armor_layers = variant
+        self.enemy.is_elite = True
+        self.enemy.elite_title = title
+        self.enemy.name = f"{title} {self.enemy.name}"
+        self.enemy.stats.max_hp *= 1.25
+        self.enemy.stats._current_hp = self.enemy.stats.max_hp
+        self.enemy.stats.attack *= 1.15
+        self.enemy.stats.magic_ability *= 1.15
+        self.enemy.stats.speed *= 1.08
+        self.enemy.armor_layers += armor_layers
+        if bonus_attack in attacks and bonus_attack not in self.enemy.attack_ids:
+            self.enemy.attack_ids.append(bonus_attack)
+            self.enemy.cooldowns.setdefault(bonus_attack, 0)
+        self.battle_terrain = terrain_override
+        self.encounter_objective = {"type": "break_armor", "label": "Break elite armor"}
+
+    def _boss_phase_profile(self, enemy_id: str) -> List[Dict]:
+        profiles = {
+            "easy_boss": [
+                {"threshold": 0.70, "message": "The commander hardens its shell!", "armor": 1, "hazard": "crystal"},
+                {"threshold": 0.35, "message": "Royal punishments fill the arena!", "add_attacks": ["royal_decree", "spore_catapult"], "hazard": "lightning"},
+            ],
+            "hard_boss": [
+                {"threshold": 0.75, "message": "Barrier anchors flare to life!", "add_attacks": ["scorch_tribute"], "armor": 1, "hazard": "void"},
+                {"threshold": 0.45, "message": "The tyrant begins charging a comet!", "add_attacks": ["frostfall_comet"], "charge": "frostfall_comet", "hazard": "ice"},
+                {"threshold": 0.20, "message": "The arena tears open with desperate force!", "add_attacks": ["abyssal_anchor", "rift_bloom"], "hazard": "stink"},
+            ],
+            "boat_mom_easy": [
+                {"threshold": 0.60, "message": "Boiling tides flood the floor!", "add_attacks": ["boiling_tide"], "hazard": "steam"},
+                {"threshold": 0.30, "message": "Boat Mom floods the battlefield!", "add_attacks": ["tidal_snare"], "hazard": "water"},
+            ],
+        }
+        return profiles.get(enemy_id, [])
+
+    def _spawn_battle_hazard(self, hazard_type: str, owner: Optional[Character] = None, duration: int = 4):
+        arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
+        hazard_colors = {
+            "water": ((80, 176, 235), "soaked"),
+            "steam": ((218, 224, 224), "slow"),
+            "crystal": ((187, 133, 255), "brittle"),
+            "void": ((121, 87, 216), "wounded"),
+            "lightning": ((255, 226, 98), "shock"),
+            "stink": ((158, 184, 78), "stinky"),
+            "ice": ((149, 218, 250), "freeze"),
+        }
+        color, status = hazard_colors.get(hazard_type, ((160, 160, 160), "slow"))
+        target = self.player if owner == self.enemy else self.enemy
+        center_x = random.randint(int(arena_left + 80), int(arena_right - 80))
+        center_y = random.randint(int(arena_top + 60), int(arena_bottom - 60))
+        if target:
+            center_x = int((center_x + target.x + target.width / 2) / 2)
+            center_y = int((center_y + target.y + target.height / 2) / 2)
+        self.active_hazards.append({
+            "type": hazard_type,
+            "x": center_x,
+            "y": center_y,
+            "radius": 34,
+            "duration": duration,
+            "color": color,
+            "status": status,
+            "damage": 14 + duration * 2,
+        })
+
+    def _spawn_puzzle_sigils(self, count: int = 1):
+        arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
+        spawn_points = [
+            (arena_left + 110, arena_top + 85),
+            (arena_right - 110, arena_top + 95),
+            ((arena_left + arena_right) / 2, arena_bottom - 90),
+            (arena_left + 160, arena_bottom - 120),
+            (arena_right - 160, arena_bottom - 120),
+        ]
+        existing_positions = {(int(sigil["x"]), int(sigil["y"])) for sigil in self.active_sigils}
+        added = 0
+        for x, y in spawn_points:
+            if added >= count:
+                break
+            key = (int(x), int(y))
+            if key in existing_positions:
+                continue
+            self.active_sigils.append({
+                "kind": "anchor",
+                "name": "Barrier Anchor",
+                "x": float(x),
+                "y": float(y),
+                "radius": 18,
+                "types": ["void"],
+            })
+            existing_positions.add(key)
+            added += 1
+        if self.enemy:
+            self.enemy.puzzle_sigils = len(self.active_sigils)
+
+    def _battle_target_center(self, target) -> tuple[float, float]:
+        if isinstance(target, Character):
+            return self._character_center(target)
+        return float(target.get("x", 0)), float(target.get("y", 0))
+
+    def _battle_target_name(self, target) -> str:
+        if isinstance(target, Character):
+            return target.name
+        return str(target.get("name", "Target"))
+
+    def _player_battle_targets(self) -> List[object]:
+        targets: List[object] = []
+        if self.enemy and self.enemy.is_alive():
+            targets.append(self.enemy)
+        targets.extend(self.active_sigils)
+        return targets
+
+    def _clamp_selected_battle_target(self):
+        targets = self._player_battle_targets()
+        if not targets:
+            self.selected_battle_target = 0
+            return
+        self.selected_battle_target = max(0, min(self.selected_battle_target, len(targets) - 1))
+
+    def _current_player_battle_target(self):
+        targets = self._player_battle_targets()
+        if not targets:
+            return self.enemy
+        self._clamp_selected_battle_target()
+        return targets[self.selected_battle_target]
+
+    def _cycle_battle_target(self, direction: int = 1):
+        targets = self._player_battle_targets()
+        if len(targets) <= 1:
+            return
+        self.selected_battle_target = (self.selected_battle_target + direction) % len(targets)
+        current_target = self._current_player_battle_target()
+        if current_target:
+            self._message(f"Targeting {self._battle_target_name(current_target)}.", 150)
+
+    def _distance_to_target_in_tiles(self, attacker: Character, target) -> float:
+        attacker_x, attacker_y = self._character_center(attacker)
+        target_x, target_y = self._battle_target_center(target)
+        return math.hypot(attacker_x - target_x, attacker_y - target_y) / TILE_SIZE
+
+    def _apply_guaranteed_self_damage(self, actor: Character, amount: float) -> float:
+        actual = max(0.0, float(amount))
+        actor.stats.current_hp = max(0.0, actor.stats.current_hp - actual)
+        return actual
+
+    def _player_attack_sigil(self, sigil: Dict, attack_id: str) -> bool:
+        attack_data = INSTINCT_ATTACK if attack_id == INSTINCT_ATTACK_ID else attacks.get(attack_id)
+        if not attack_data or not self.player:
+            return False
+        current_cooldown = 0 if attack_id == INSTINCT_ATTACK_ID else self.player.cooldowns.get(attack_id, 0)
+        if current_cooldown > 0:
+            self._message(f"{attack_data['name']} is on cooldown for {current_cooldown} more turn(s).", 150)
+            return False
+        charge_turns = int(attack_data.get("charge_turns", 0))
+        if charge_turns > 0 and self.player.pending_charge_attack_id != attack_id:
+            self.player.pending_charge_attack_id = attack_id
+            self.player.pending_charge_turns = charge_turns
+            self._message(f"{self.player.name} begins charging {attack_data['name']}!", 180)
+            return True
+        distance = self._distance_to_target_in_tiles(self.player, sigil)
+        if distance > attack_data.get("range", 1):
+            self._message(f"{attack_data['name']} is out of range ({distance:.1f}/{attack_data.get('range', 1)} tiles).", 150)
+            return False
+        attack_types = parse_type_list(attack_data.get("element", "neutral"))
+        allowed_types = parse_type_list(self.encounter_objective.get("allowed_types", []))
+        if allowed_types and not any(attack_type in allowed_types for attack_type in attack_types):
+            self._message(f"{attack_data['name']} cannot break this anchor.", 160)
+            return False
+        if attack_data.get("self_damage", 0):
+            recoil = self._apply_guaranteed_self_damage(self.player, float(attack_data.get("self_damage", 0)))
+            if recoil > 0:
+                self._message(f"{self.player.name} sacrifices {recoil:.0f} HP for power!", 150)
+        if attack_id != INSTINCT_ATTACK_ID:
+            self.player.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
+        self._message(f"{self.player.name} uses {attack_data['name']} on a Barrier Anchor!", 150)
+        self.active_sigils = [entry for entry in self.active_sigils if entry is not sigil]
+        if self.enemy:
+            self.enemy.puzzle_sigils = len(self.active_sigils)
+        self._message("A barrier anchor breaks!", 180)
+        self.selected_battle_target = 0
+        if self.player.pending_charge_attack_id == attack_id:
+            self.player.pending_charge_attack_id = None
+            self.player.pending_charge_turns = 0
+        self._maybe_complete_objective()
+        return True
+
+    def _advance_enemy_phase_if_needed(self):
+        if not self.enemy or not self.enemy_config_for_battle:
+            return
+        enemy_id = str(self.enemy_config_for_battle.get("id", "")).lower()
+        hp_ratio = self.enemy.stats.current_hp / max(1.0, self.enemy.stats.max_hp)
+        for phase in self._boss_phase_profile(enemy_id):
+            threshold = float(phase.get("threshold", 0))
+            if hp_ratio <= threshold and threshold not in self.enemy.phase_thresholds_triggered:
+                self.enemy.phase_thresholds_triggered.add(threshold)
+                if phase.get("message"):
+                    self._message(str(phase["message"]), 220)
+                for attack_id in phase.get("add_attacks", []):
+                    if attack_id in attacks and attack_id not in self.enemy.attack_ids:
+                        self.enemy.attack_ids.append(attack_id)
+                        self.enemy.cooldowns.setdefault(attack_id, 0)
+                self.enemy.armor_layers += int(phase.get("armor", 0))
+                if phase.get("hazard"):
+                    self._spawn_battle_hazard(str(phase["hazard"]), owner=self.enemy, duration=5)
+                if phase.get("adds"):
+                    self._spawn_puzzle_sigils(int(phase["adds"]))
+                    self._message(f"{self.enemy.name} summons {int(phase['adds'])} extra barrier anchors!", 180)
+                if phase.get("charge") and not self.enemy.pending_charge_attack_id:
+                    self.enemy.pending_charge_attack_id = str(phase["charge"])
+                    self.enemy.pending_charge_turns = 1
+
+    def _encounter_objective_complete(self) -> bool:
+        objective_type = str(self.encounter_objective.get("type", "defeat"))
+        if objective_type == "break_armor":
+            return bool(self.enemy) and self.enemy.armor_layers <= 0
+        if objective_type == "survive":
+            return self.survive_turn_progress >= self.survive_turn_goal > 0
+        if objective_type == "shatter_sigils":
+            return bool(self.enemy) and self.enemy.puzzle_sigils <= 0
+        return False
+
+    def _complete_objective_victory(self):
+        if not self.enemy:
+            return
+        self.state = GameState.PLAYER_WON
+        self._register_enemy_defeat(self.enemy)
+        self._message(f"Objective complete: {self.encounter_objective.get('label', 'Victory')}!", 240)
+        dropped_items = self._roll_enemy_drops(self.enemy)
+        if dropped_items:
+            item_names = ", ".join(items[item_id]["name"] for item_id in dropped_items)
+            self._message(f"Enemy dropped: {item_names}", 210)
+
+    def _maybe_complete_objective(self):
+        if self.state in {GameState.PLAYER_WON, GameState.PLAYER_LOST}:
+            return
+        if self.encounter_objective.get("type") == "break_armor" and self.enemy and self.enemy.armor_layers <= 0:
+            self.encounter_objective = {"type": "defeat", "label": f"Finish {self.enemy.name}"}
+            self._message(f"{self.enemy.name}'s armor is shattered! Finish the fight!", 220)
+            return
+        if self.encounter_objective.get("type") == "shatter_sigils" and self.enemy and self.enemy.puzzle_sigils <= 0:
+            self.encounter_objective = {"type": "defeat", "label": f"Finish {self.enemy.name}"}
+            self._message(f"The barrier anchors are broken! {self.enemy.name} is exposed!", 220)
+            return
+        if self._encounter_objective_complete():
+            self._complete_objective_victory()
+
+    def _choose_enemy_attack(self, consume_charge: bool = False) -> Optional[str]:
+        if not self.enemy:
+            return None
+        if self.enemy.pending_charge_attack_id and self.enemy.pending_charge_turns <= 0:
+            charge_attack = self.enemy.pending_charge_attack_id
+            if consume_charge:
+                self.enemy.pending_charge_attack_id = None
+            return charge_attack
+        current_distance = self._distance_in_tiles(self.enemy, self.player)
+        skip_opening_tether_lash = self.enemy_turns_taken == 0 and self.enemy.stats.speed > self.player.stats.speed
+        available_attacks = [
+            attack_id for attack_id in self.enemy.attack_ids
+            if self.enemy.cooldowns.get(attack_id, 0) == 0
+            and not (skip_opening_tether_lash and attack_id == "tether_lash")
+        ]
+        if not available_attacks and self.enemy.attack_ids:
+            return min(self.enemy.attack_ids, key=lambda attack_id: self.enemy.cooldowns.get(attack_id, 0))
+        best_attack = None
+        best_score = -999999.0
+        for attack_id in available_attacks:
+            attack_data = attacks.get(attack_id, {})
+            attack_range = float(attack_data.get("range", 1))
+            effects = set(get_attack_effects(attack_data))
+            attack_types = parse_type_list(attack_data.get("element", "neutral"))
+            score = float(attack_data.get("base_damage", 0))
+            if current_distance <= attack_range:
+                score += 18
+            else:
+                score -= max(0.0, current_distance - attack_range) * 12
+            if attack_data.get("charge_turns", 0) > 0 and self.enemy.stats.current_hp / max(1.0, self.enemy.stats.max_hp) < 0.55:
+                score += 20
+            if "tether_lash" == attack_id and current_distance >= attack_data.get("distance_threshold", 6):
+                score += 26
+            if self.player.has_status("soaked") and "lightning" in attack_types:
+                score += 34
+            if self.player.has_status("rooted") and any(t in attack_types for t in ("earth", "physical", "fire", "metal")):
+                score += 20
+            if self.player.has_status("brittle") and any(t in attack_types for t in ("crystal", "physical", "metal")):
+                score += 24
+            if self.player.has_status("burn") and "water" in attack_types:
+                score += 10
+            if "mirror_peel" in effects and self.player.stats.magic_ability >= self.player.stats.attack:
+                score += 18
+            if "gravy_ward" in effects and self.enemy.stats.current_hp / max(1.0, self.enemy.stats.max_hp) < 0.55:
+                score += 16
+            if "potato_mine" in effects and not self.active_hazards:
+                score += 12
+            if self.encounter_objective.get("type") in {"break_armor", "defeat"} and self.enemy.armor_layers > 0 and attack_data.get("base_damage", 0) == 0:
+                score += 8
+            if self.encounter_objective.get("type") == "survive":
+                if "gravy_ward" in effects or "mirror_peel" in effects or "heavy_shield" in effects:
+                    score += 26
+                if attack_range >= 6:
+                    score += 8
+            if self.encounter_objective.get("type") == "shatter_sigils" and "void" in attack_types:
+                score += 14
+            if self.battle_time_of_day == "night" and "void" in attack_types:
+                score += 10
+            if self.battle_terrain == "shore" and "water" in attack_types:
+                score += 10
+            if self.battle_terrain == "forge" and "fire" in attack_types:
+                score += 10
+            if self.battle_terrain == "thicket" and "nature" in attack_types:
+                score += 10
+            score += random.uniform(0.0, 8.0)
+            if score > best_score:
+                best_score = score
+                best_attack = attack_id
+        if best_attack:
+            return best_attack
+        return None
+
+    def _plan_enemy_intent(self):
+        if not self.enemy or self.state not in {GameState.BATTLE, GameState.ENEMY_TURN}:
+            return
+        planned_attack = self._choose_enemy_attack(consume_charge=False)
+        if not planned_attack:
+            self.enemy.intent_data = {"label": "Hesitate", "type": "idle"}
+            return
+        attack_data = attacks.get(planned_attack, {})
+        label = attack_data.get("name", planned_attack)
+        intent_type = "attack"
+        if attack_data.get("charge_turns", 0) > 0:
+            intent_type = "charge"
+        elif attack_data.get("base_damage", 0) == 0:
+            intent_type = "buff"
+        elif "potato_mine" in get_attack_effects(attack_data) or "spore_catapult" == planned_attack:
+            intent_type = "hazard"
+        self.enemy.intent_data = {"attack_id": planned_attack, "label": label, "type": intent_type}
+
+    def _battle_damage_multiplier(self, attack_types: List[str], attacker: Character, target: Character) -> float:
+        multiplier = 1.0
+        attack_types = parse_type_list(attack_types)
+        if "water" in attack_types and self.battle_terrain == "shore":
+            multiplier *= 1.15
+        if "fire" in attack_types and self.battle_terrain == "forge":
+            multiplier *= 1.15
+        if "nature" in attack_types and self.battle_terrain == "thicket":
+            multiplier *= 1.15
+        if "void" in attack_types and self.battle_time_of_day == "night":
+            multiplier *= 1.12
+        if "lightning" in attack_types and target.has_status("soaked"):
+            multiplier *= 1.45
+        if any(t in attack_types for t in ("crystal", "physical", "metal")) and target.has_status("brittle"):
+            multiplier *= 1.35
+        if any(t in attack_types for t in ("earth", "physical", "fire")) and target.has_status("rooted"):
+            multiplier *= 1.2
+        if attacker.has_status("empowered"):
+            multiplier *= 1.3
+        return multiplier
+
     def _register_enemy_defeat(self, defeated: Character):
         if not self.player:
             return
         enemy_id = getattr(defeated, "character_id", defeated.name.lower())
+        if enemy_id in {"easy_boss", "boat_mom_easy", "hard_boss"}:
+            self.bosses_defeated.add(enemy_id)
+        if getattr(defeated, "is_elite", False):
+            self.bestiary_elite_seen.add(enemy_id)
+            self.bestiary_elite_counts[enemy_id] = self.bestiary_elite_counts.get(enemy_id, 0) + 1
         self.bestiary_seen.add(enemy_id)
         self.bestiary_counts[enemy_id] = self.bestiary_counts.get(enemy_id, 0) + 1
         leveled_up = self.player.record_enemy_defeat()
@@ -2353,6 +2883,8 @@ class Game:
             hp_text = selected_enemy.get("stats", {}).get("max_hp", selected_enemy.get("max_hp", "???")) if seen else "???"
             attack_count = len(selected_enemy.get("attack_ids", selected_enemy.get("attack_pool", []))) if seen else "?"
             defeats = self.bestiary_counts.get(enemy_id, 0)
+            elite_seen = enemy_id in self.bestiary_elite_seen
+            elite_defeats = self.bestiary_elite_counts.get(enemy_id, 0)
             description = selected_enemy.get("description", "No notes yet.") if seen else "A hidden entry. Defeat this foe to reveal it."
             display_types = parse_type_list(selected_enemy.get("types")) if seen else []
 
@@ -2380,6 +2912,8 @@ class Game:
                 f"HP: {hp_text}",
                 f"Moves: {attack_count}",
                 f"Defeated: {defeats}",
+                f"Elite Seen: {'Yes' if elite_seen and seen else 'No' if seen else '???'}",
+                f"Elite Defeats: {elite_defeats if seen else '???'}",
             ]
             stat_y = divider_y + 14
             for line in stat_lines:
@@ -2470,7 +3004,15 @@ class Game:
     def _start_battle_turn_order(self):
         if not self.player or not self.enemy:
             return
-        self._message("A wild enemy appears!", 120)
+        opener = "A wild enemy appears!"
+        if self.enemy.is_elite:
+            opener = f"An elite foe appears: {self.enemy.name}!"
+        elif self._is_boss_enemy(self.enemy_config_for_battle or {}):
+            opener = f"{self.enemy.name} enters with a boss aura!"
+        self._message(opener, 150)
+        self._message(f"Terrain: {self.battle_terrain.title()} | Time: {self.battle_time_of_day.title()}", 180)
+        objective_label = str(self.encounter_objective.get("label", "Defeat the foe"))
+        self._message(f"Objective: {objective_label}", 210)
         if self.enemy.stats.speed > self.player.stats.speed:
             self.state = GameState.ENEMY_TURN
             self._clear_player_attack_timer()
@@ -2479,6 +3021,7 @@ class Game:
             self._start_player_attack_timer()
         faster_name = self.enemy.name if self.enemy.stats.speed > self.player.stats.speed else self.player.name
         self._message(f"{faster_name} has the first turn.", 150)
+        self._plan_enemy_intent()
 
     def _apply_knockback(self, attacker: Character, target: Character, distance_pixels: int = TILE_SIZE * 4):
         dx = (target.x + target.width / 2) - (attacker.x + attacker.width / 2)
@@ -2766,9 +3309,85 @@ class Game:
                 target.hot_potato_turns = max(target.hot_potato_turns, int(attack_data.get("delay_turns", 2)))
                 target.hot_potato_damage = max(target.hot_potato_damage, float(attack_data.get("delayed_damage", 110)))
                 self._message(f"{attacker.name} tosses a hot potato onto {target.name}!", 150)
+            elif effect == "arena_hazard":
+                hazard_type = str(attack_data.get("hazard_type", "void"))
+                hazard_count = max(1, int(attack_data.get("hazard_count", 2)))
+                for _ in range(hazard_count):
+                    self._spawn_battle_hazard(hazard_type, owner=attacker, duration=int(attack_data.get("hazard_duration", 5)))
+                self._message(f"{attacker.name} twists the arena with {hazard_type} hazards!", 180)
+
+    def _apply_elemental_statuses(self, attacker: Character, target: Character, attack_types: List[str], actual_damage: float):
+        if actual_damage <= 0:
+            return
+        applied = []
+        if "water" in attack_types and not target.has_status("soaked") and random.random() < 0.45:
+            target.apply_status("soaked", 2)
+            applied.append("soaked")
+        if any(attack_type in attack_types for attack_type in ("nature", "earth")) and not target.has_status("rooted") and random.random() < 0.35:
+            target.apply_status("rooted", 2)
+            applied.append("rooted")
+        if any(attack_type in attack_types for attack_type in ("crystal", "ice", "metal")) and not target.has_status("brittle") and random.random() < 0.35:
+            target.apply_status("brittle", 2)
+            applied.append("brittle")
+        if attack_types and "potato" in attack_types and not attacker.has_status("empowered") and random.random() < 0.20:
+            attacker.apply_status("empowered", 2)
+            applied.append(f"{attacker.name} is empowered")
+        for status in applied:
+            if status.startswith(attacker.name):
+                self._message(status + "!", 140)
+            else:
+                self._message(f"{target.name} is {status}!", 140)
+
+    def _apply_hazard_pressure(self, actor: Character):
+        center_x, center_y = self._character_center(actor)
+        for hazard in self.active_hazards:
+            distance = math.hypot(center_x - hazard["x"], center_y - hazard["y"])
+            if distance <= hazard.get("radius", 34):
+                damage, dodged = actor.take_damage(hazard.get("damage", 12), ignore_defense=True)
+                if not dodged and damage > 0:
+                    status_name = str(hazard.get("status", "")).strip()
+                    if status_name:
+                        turns = 1 if status_name in {"freeze", "shock", "stinky"} else 2
+                        actor.apply_status(status_name, turns)
+                    self._message(f"{actor.name} is caught in {hazard['type']} hazard for {damage:.0f} damage!", 150)
+
+    def _trigger_battle_event(self):
+        if not self.enemy:
+            return
+        events_by_terrain = {
+            "meadow": ("Wild spores drift through the arena!", "nature"),
+            "shore": ("A crashing wave drenches the field!", "water"),
+            "forge": ("The forge floor spits embers!", "steam"),
+            "thicket": ("Roots burst from the ground!", "stink"),
+            "ruins": ("The ruins crack with unstable crystal!", "crystal"),
+            "void": ("The void whispers and tears the floor!", "void"),
+        }
+        event_text, hazard_type = events_by_terrain.get(self.battle_terrain, ("The arena shifts!", "crystal"))
+        self._message(event_text, 200)
+        self._spawn_battle_hazard(hazard_type, owner=self.enemy, duration=4)
+        if self.battle_time_of_day == "night" and random.random() < 0.5:
+            self.enemy.apply_status("empowered", 1)
+            self._message(f"{self.enemy.name} draws strength from the night.", 160)
 
     def _begin_turn(self, actor: Character, opponent: Character, is_player_turn: bool) -> bool:
         self._tick_special_turn_effects(actor)
+        self._apply_hazard_pressure(actor)
+        if not actor.is_alive():
+            self.state = GameState.PLAYER_LOST if is_player_turn else GameState.PLAYER_WON
+            if not is_player_turn and self.enemy:
+                self._register_enemy_defeat(self.enemy)
+                self._message("Victory! Bestiary entry updated.", 210)
+            else:
+                self._message("You were defeated!", 180)
+            return False
+
+        if actor.pending_charge_turns > 0:
+            actor.pending_charge_turns -= 1
+            if actor.pending_charge_turns > 0:
+                attack_name = attacks.get(actor.pending_charge_attack_id, {}).get("name", "a powerful move")
+                self._message(f"{actor.name} continues charging {attack_name}...", 150)
+                self._finish_turn(actor, next_state=GameState.ENEMY_TURN if is_player_turn else GameState.BATTLE)
+                return False
 
         if actor.has_status("burn"):
             burn_damage, burn_dodged = actor.take_damage(6, ignore_defense=True)
@@ -2802,9 +3421,27 @@ class Game:
     def _finish_turn(self, actor: Character, next_state: GameState):
         actor.tick_cooldowns()
         actor.tick_statuses()
+        if actor.has_status("empowered"):
+            actor.status_effects["empowered"] = max(0, actor.status_effects.get("empowered", 0))
+            if not actor.has_status("empowered"):
+                actor.damage_bonus_multiplier = 1.0
+        for hazard in self.active_hazards:
+            hazard["duration"] -= 1
+        self.active_hazards = [hazard for hazard in self.active_hazards if hazard["duration"] > 0]
+        if actor == self.enemy:
+            self.battle_round += 1
+            if self.encounter_objective.get("type") == "survive":
+                self.survive_turn_progress += 1
+            if self.battle_round >= self.battle_event_turn:
+                self._trigger_battle_event()
+                self.battle_event_turn += random.randint(2, 3)
         self.state = next_state
+        self._maybe_complete_objective()
+        if self.state in {GameState.PLAYER_WON, GameState.PLAYER_LOST}:
+            return
         if next_state == GameState.BATTLE:
             self._start_player_attack_timer()
+            self._plan_enemy_intent()
         else:
             self._clear_player_attack_timer()
 
@@ -2817,11 +3454,23 @@ class Game:
         if not attack_data:
             self._message(f"Missing attack data for {attack_id}", 180)
             return False
+        charged_release = attacker.pending_charge_attack_id == attack_id and attacker.pending_charge_turns <= 0
+
+        if attacker.pending_charge_attack_id == attack_id and attacker.pending_charge_turns > 0:
+            self._message(f"{attacker.name} is still charging {attack_data.get('name', attack_id)}!", 150)
+            return False
         
         current_cooldown = 0 if attack_id == INSTINCT_ATTACK_ID else attacker.cooldowns.get(attack_id, 0)
-        if current_cooldown > 0:
+        if current_cooldown > 0 and not charged_release:
             self._message(f"{attack_data['name']} is on cooldown for {current_cooldown} more turn(s).", 150)
             return False
+
+        charge_turns = int(attack_data.get("charge_turns", 0))
+        if charge_turns > 0 and attacker.pending_charge_attack_id != attack_id:
+            attacker.pending_charge_attack_id = attack_id
+            attacker.pending_charge_turns = charge_turns
+            self._message(f"{attacker.name} begins charging {attack_data['name']}!", 180)
+            return True
         
         effect_names = get_attack_effects(attack_data)
         self_buff_effects = {"light_shield", "heavy_shield", "burn_aura", "counter", "mirror_peel", "gravy_ward", "potato_mine"}
@@ -2846,6 +3495,11 @@ class Game:
         attack_types = parse_type_list(attack_data.get("element", "neutral"))
         type_multiplier = self._type_multiplier(attack_types, getattr(target, "types", ["neutral"]))
         damage *= type_multiplier
+        damage *= self._battle_damage_multiplier(attack_types, attacker, target)
+        if attack_data.get("self_damage", 0):
+            self_hit = self._apply_guaranteed_self_damage(attacker, float(attack_data.get("self_damage", 0)))
+            if self_hit > 0:
+                self._message(f"{attacker.name} sacrifices {self_hit:.0f} HP for power!", 150)
         ignore_defense = "pierce" in effect_names
         if is_self_buff:
             actual_damage = 0
@@ -2867,6 +3521,12 @@ class Game:
             else:
                 actual_damage, was_dodged = target.take_damage(damage, ignore_defense=ignore_defense)
                 reflected = False
+            if (
+                target == self.enemy
+                and self.encounter_objective.get("type") == "shatter_sigils"
+                and self.enemy.puzzle_sigils > 0
+            ):
+                actual_damage = min(actual_damage, 12)
             if not reflected and actual_damage > 0 and target.counter_turns > 0:
                 counter_damage = actual_damage * 2
                 counter_hit, _ = attacker.take_damage(counter_damage, ignore_defense=True)
@@ -2894,6 +3554,7 @@ class Game:
 
         if not was_dodged and not reflected:
             self._apply_attack_effects(attacker, target, attack_data)
+            self._apply_elemental_statuses(attacker, target, attack_types, actual_damage)
         if not is_self_buff and not reflected and actual_damage > 0 and target.fire_shield_turns > 0:
             burn_back = target.fire_shield_damage
             reflected_damage, reflected_dodged = attacker.take_damage(burn_back, ignore_defense=True)
@@ -2909,6 +3570,11 @@ class Game:
                 healed = target.stats.current_hp - old_hp
                 if healed > 0:
                     self._message(f"{target.name}'s gravy ward restores {healed:.0f} HP!", 150)
+        if attacker.pending_charge_attack_id == attack_id:
+            attacker.pending_charge_attack_id = None
+            attacker.pending_charge_turns = 0
+        self._advance_enemy_phase_if_needed()
+        self._maybe_complete_objective()
         return True
 
     def _handle_defeat_if_needed(self, defeated: Character, victor: Character, victor_is_player: bool) -> bool:
@@ -2944,10 +3610,16 @@ class Game:
         if self._all_equipped_attacks_on_cooldown(self.player):
             attack_id = INSTINCT_ATTACK_ID
             self._message("All moves are recharging. Instinct Strike kicks in!", 150)
+        elif self.player.pending_charge_attack_id and self.player.pending_charge_turns <= 0:
+            attack_id = self.player.pending_charge_attack_id
         else:
             attack_index = min(self.selected_attack, len(self.player.attack_ids) - 1)
             attack_id = self.player.attack_ids[attack_index]
-        attack_used = self._execute_attack(self.player, self.enemy, attack_id, is_player_turn=True)
+        chosen_target = self._current_player_battle_target()
+        if isinstance(chosen_target, dict):
+            attack_used = self._player_attack_sigil(chosen_target, attack_id)
+        else:
+            attack_used = self._execute_attack(self.player, self.enemy, attack_id, is_player_turn=True)
         if not attack_used:
             return
         
@@ -2972,43 +3644,7 @@ class Game:
         """Execute enemy attack"""
         if not self._begin_turn(self.enemy, self.player, is_player_turn=False):
             return
-        
-        current_distance = self._distance_in_tiles(self.enemy, self.player)
-        skip_opening_tether_lash = (
-            self.enemy_turns_taken == 0
-            and self.enemy.stats.speed > self.player.stats.speed
-        )
-        available_attacks = [
-            attack_id for attack_id in self.enemy.attack_ids
-            if self.enemy.cooldowns.get(attack_id, 0) == 0
-            and not (skip_opening_tether_lash and attack_id == "tether_lash")
-        ]
-        in_range_attacks = [
-            attack_id for attack_id in available_attacks
-            if current_distance <= attacks[attack_id].get("range", 1)
-        ]
-        
-        chosen_attack = None
-        tether_ready = [
-            attack_id for attack_id in available_attacks
-            if attack_id == "tether_lash"
-            and self.enemy_turns_taken > 0
-            and current_distance >= attacks[attack_id].get("distance_threshold", 6)
-        ]
-        if tether_ready:
-            chosen_attack = tether_ready[0]
-        elif in_range_attacks:
-            chosen_attack = random.choice(in_range_attacks)
-        elif available_attacks:
-            chosen_attack = random.choice(available_attacks)
-        elif self.enemy.attack_ids:
-            fallback_attacks = [
-                attack_id for attack_id in self.enemy.attack_ids
-                if not (skip_opening_tether_lash and attack_id == "tether_lash")
-            ]
-            if fallback_attacks:
-                chosen_attack = min(fallback_attacks, key=lambda attack_id: self.enemy.cooldowns.get(attack_id, 0))
-        
+        chosen_attack = self._choose_enemy_attack(consume_charge=True)
         if not chosen_attack:
             self._message(f"{self.enemy.name} hesitates.", 120)
             self._finish_turn(self.enemy, next_state=GameState.BATTLE)
@@ -3319,8 +3955,9 @@ class Game:
             TERRAIN_EXIT: "Exit",
         }
         info_panel_y = hud_y + hud_height + 6
-        info_panel_width = 210
-        info_panel_height = 64
+        info_panel_width = 260
+        pending_boss_id = self._pending_boss_encounter_id()
+        info_panel_height = 92 if pending_boss_id else 64
         info_surface = pygame.Surface((info_panel_width, info_panel_height), pygame.SRCALPHA)
         info_surface.fill((54, 54, 58, 165))
         self.screen.blit(info_surface, (hud_x + 2, info_panel_y))
@@ -3334,6 +3971,11 @@ class Game:
             map_name = self.map_data[self.current_map_index].get("name", "Unknown Map")
             map_text = self.font_small.render(f"Map: {map_name}", True, hud_muted)
             self.screen.blit(map_text, (hud_x + 12, info_panel_y + 38))
+        if pending_boss_id:
+            boss_lookup = {enemy.get("id"): enemy.get("name", enemy.get("id", "Boss")) for enemy in self.enemy_data}
+            boss_name = boss_lookup.get(pending_boss_id, pending_boss_id)
+            boss_text = self.font_small.render(f"Boss Nearby: {boss_name}", True, (181, 78, 78))
+            self.screen.blit(boss_text, (hud_x + 12, info_panel_y + 66))
         
         # Draw instructions in a compact top-right HUD panel
         instructions = [
@@ -3367,12 +4009,21 @@ class Game:
     
     def draw_battle(self):
         # Draw battle arena background
-        self.screen.fill((30, 30, 40))
+        style = self._current_battle_style()
+        self.screen.fill(style["bg"])
         
         # Draw arena boundaries
         arena_left, arena_top, arena_right, arena_bottom = self._battle_arena_bounds()
-        
-        pygame.draw.rect(self.screen, (100, 100, 120), (arena_left, arena_top, arena_right - arena_left, arena_bottom - arena_top), 2)
+        arena_rect = pygame.Rect(arena_left, arena_top, arena_right - arena_left, arena_bottom - arena_top)
+        pygame.draw.rect(self.screen, style["floor"], arena_rect)
+        if self.battle_time_of_day == "night":
+            night_overlay = pygame.Surface((arena_rect.width, arena_rect.height), pygame.SRCALPHA)
+            night_overlay.fill((28, 28, 52, 72))
+            self.screen.blit(night_overlay, arena_rect.topleft)
+        pygame.draw.rect(self.screen, style["line"], arena_rect, 2)
+        for band in range(3):
+            line_y = arena_top + 60 + band * 110
+            pygame.draw.line(self.screen, (*style["line"], 120)[:3], (arena_left + 12, line_y), (arena_right - 12, line_y), 1)
         
         # Draw characters in arena
         for mine in self.active_mines:
@@ -3383,13 +4034,57 @@ class Game:
             pygame.draw.circle(self.screen, (126, 88, 46), (mine_x, mine_y), 12)
             pygame.draw.circle(self.screen, (214, 191, 120), (mine_x, mine_y), 8)
             pygame.draw.circle(self.screen, (90, 58, 22), (mine_x + 3, mine_y - 2), 2)
+        for hazard in self.active_hazards:
+            hx = int(hazard["x"])
+            hy = int(hazard["y"])
+            radius = int(hazard.get("radius", 34))
+            pulse = 2 + int(3 * math.sin(pygame.time.get_ticks() / 160.0))
+            pygame.draw.circle(self.screen, hazard["color"], (hx, hy), radius + pulse, 2)
+            pygame.draw.circle(self.screen, hazard["color"], (hx, hy), max(8, radius // 2), 1)
+        current_target = self._current_player_battle_target() if self.state == GameState.BATTLE else None
+        for sigil in self.active_sigils:
+            sx = int(sigil["x"])
+            sy = int(sigil["y"])
+            selected = sigil is current_target
+            color = (194, 160, 255)
+            pygame.draw.circle(self.screen, color, (sx, sy), 18, 3)
+            pygame.draw.circle(self.screen, (246, 240, 255), (sx, sy), 10, 2)
+            pygame.draw.circle(self.screen, (89, 70, 138), (sx, sy), 4)
+            if selected:
+                pygame.draw.circle(self.screen, YELLOW, (sx, sy), 26, 2)
+            sigil_label = self.font_small.render("Anchor", True, color)
+            self.screen.blit(sigil_label, (sx - sigil_label.get_width() // 2, sy + 22))
         if not self._character_hidden_by_cutscene(self.player):
             self.player.draw(self.screen)
             self._draw_character_status_vfx(self.player)
         if not self._character_hidden_by_cutscene(self.enemy):
             self.enemy.draw(self.screen)
             self._draw_character_status_vfx(self.enemy)
-        
+        if self.enemy is current_target:
+            enemy_center_x, enemy_center_y = self._character_center(self.enemy)
+            size = 40
+            thickness = 3
+            color = (255, 255, 0)
+
+            x = int(enemy_center_x)
+            y = int(enemy_center_y)
+
+            # top-left
+            pygame.draw.line(self.screen, color, (x - size, y - size), (x - size + 10, y - size), thickness)
+            pygame.draw.line(self.screen, color, (x - size, y - size), (x - size, y - size + 10), thickness)
+
+            # top-right
+            pygame.draw.line(self.screen, color, (x + size, y - size), (x + size - 10, y - size), thickness)
+            pygame.draw.line(self.screen, color, (x + size, y - size), (x + size, y - size + 10), thickness)
+
+            # bottom-left
+            pygame.draw.line(self.screen, color, (x - size, y + size), (x - size + 10, y + size), thickness)
+            pygame.draw.line(self.screen, color, (x - size, y + size), (x - size, y + size - 10), thickness)
+
+            # bottom-right
+            pygame.draw.line(self.screen, color, (x + size, y + size), (x + size - 10, y + size), thickness)
+            pygame.draw.line(self.screen, color, (x + size, y + size), (x + size, y + size - 10), thickness)
+                    
         # Draw character names and stats
         player_name = self.font_small.render(f"{self.player.name} (Lv.{self.player.level})", True, BLUE)
         player_name_x = max(20, min(self.player.x - player_name.get_width() // 2 + self.player.width // 2, SCREEN_WIDTH - player_name.get_width() - 20))
@@ -3405,9 +4100,18 @@ class Game:
         
         enemy_hp = self.font_small.render(f"HP: {self.enemy.stats.current_hp:.0f}/{self.enemy.stats.max_hp:.0f}", True, WHITE)
         self.screen.blit(enemy_hp, (SCREEN_WIDTH - enemy_hp.get_width() - 20, 20))
+        terrain_text = self.font_small.render(
+            f"Terrain: {self.battle_terrain.title()} | {self.battle_time_of_day.title()}",
+            True,
+            (210, 220, 240),
+        )
+        self.screen.blit(terrain_text, (20, 110))
+        next_event_in = max(0, self.battle_event_turn - self.battle_round)
+        event_text = self.font_small.render(f"Event In: {next_event_in} turn(s)", True, (180, 228, 220))
+        self.screen.blit(event_text, (20, 140))
 
         fps_text = self.font_small.render(f"FPS: {self.current_fps:.0f}", True, WHITE)
-        self.screen.blit(fps_text, (20, 140 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 110))
+        self.screen.blit(fps_text, (20, 230 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 200))
         
         # Draw AC and stats
         ac_text = self.font_small.render(f"AC: {self.player.ability_charges}/{self.player.max_ability_charges}", True, YELLOW)
@@ -3419,11 +4123,17 @@ class Game:
             self.screen.blit(timer_text, (20, 80))
         distance = self._distance_in_tiles(self.player, self.enemy)
         distance_text = self.font_small.render(f"Distance: {distance:.1f} tiles", True, WHITE)
-        self.screen.blit(distance_text, (20, 170 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 140))
+        self.screen.blit(distance_text, (20, 260 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 230))
+        objective_text = self.font_small.render(
+            f"Objective: {self.encounter_objective.get('label', 'Defeat the foe')}",
+            True,
+            (255, 230, 120),
+        )
+        self.screen.blit(objective_text, (20, 290 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 260))
         
         if self.player.status_effects:
             player_status = ", ".join(f"{name}:{turns}" for name, turns in self.player.status_effects.items())
-            status_y = 200 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 170
+            status_y = 320 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 290
             status_text = self.font_small.render(f"Status: {player_status}", True, WHITE)
             self.screen.blit(status_text, (20, status_y))
         extra_player_flags = []
@@ -3434,11 +4144,11 @@ class Game:
         if self.player.hot_potato_turns > 0:
             extra_player_flags.append(f"hot potato:{self.player.hot_potato_turns}")
         if extra_player_flags:
-            extra_y = 230 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 200
+            extra_y = 350 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 320
             extra_text = self.font_small.render(f"Effects: {', '.join(extra_player_flags)}", True, WHITE)
             self.screen.blit(extra_text, (20, extra_y))
         if self.player.next_dodge_chance > 0:
-            dodge_y = 260 if extra_player_flags and self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else (230 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 200)
+            dodge_y = 380 if extra_player_flags and self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else (350 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 320)
             dodge_text = self.font_small.render("Dodge: ready", True, YELLOW)
             self.screen.blit(dodge_text, (20, dodge_y))
         if self.enemy.status_effects:
@@ -3457,8 +4167,34 @@ class Game:
             extra_enemy_text = self.font_small.render(f"Enemy FX: {', '.join(extra_enemy_flags)}", True, WHITE)
             extra_enemy_x = max(20, SCREEN_WIDTH - extra_enemy_text.get_width() - 20)
             self.screen.blit(extra_enemy_text, (extra_enemy_x, 80))
+        if self.enemy.intent_data:
+            intent_label = str(self.enemy.intent_data.get("label", "Waiting"))
+            intent_type = str(self.enemy.intent_data.get("type", "attack")).title()
+            intent_surface = self.font_small.render(f"Intent: {intent_type} - {intent_label}", True, (255, 214, 120))
+            intent_x = max(20, SCREEN_WIDTH - intent_surface.get_width() - 20)
+            self.screen.blit(intent_surface, (intent_x, 110))
+        if self.enemy.armor_layers > 0:
+            armor_surface = self.font_small.render(f"Armor Plates: {self.enemy.armor_layers}", True, (204, 220, 240))
+            armor_x = max(20, SCREEN_WIDTH - armor_surface.get_width() - 20)
+            self.screen.blit(armor_surface, (armor_x, 140))
+        if self.enemy.puzzle_sigils > 0:
+            sigil_surface = self.font_small.render(f"Barrier Anchors: {self.enemy.puzzle_sigils}", True, (194, 160, 255))
+            sigil_x = max(20, SCREEN_WIDTH - sigil_surface.get_width() - 20)
+            self.screen.blit(sigil_surface, (sigil_x, 170))
+        if self.encounter_objective.get("type") == "survive":
+            survive_surface = self.font_small.render(
+                f"Survive: {self.survive_turn_progress}/{self.survive_turn_goal}",
+                True,
+                (150, 226, 223),
+            )
+            survive_x = max(20, SCREEN_WIDTH - survive_surface.get_width() - 20)
+            self.screen.blit(survive_surface, (survive_x, 200))
         
         # Draw attack options with controls
+        if current_target:
+            target_surface = self.font_small.render(f"Target: {self._battle_target_name(current_target)}", True, (255, 230, 118))
+            target_x = max(20, SCREEN_WIDTH - target_surface.get_width() - 20)
+            self.screen.blit(target_surface, (target_x, 230))
         attack_y = SCREEN_HEIGHT - 190
         current_page = self._current_attack_page(self.player)
         max_page = self._max_attack_page(self.player)
@@ -3499,7 +4235,7 @@ class Game:
             self.screen.blit(instinct_text, (20, attack_y - 28))
         
         # Draw movement instructions
-        move_text = self.font_small.render("WASD move, SPACE attack, Q/E page, R recover, F dodge, I inventory", True, GRAY)
+        move_text = self.font_small.render("WASD move, T target, SPACE attack, Q/E page, R recover, F dodge, I inventory", True, GRAY)
         move_x = max(20, SCREEN_WIDTH - move_text.get_width() - 20)
         self.screen.blit(move_text, (move_x, SCREEN_HEIGHT - 24))
         
@@ -3613,7 +4349,10 @@ class Game:
         }
         self.active_attack_cutscene = None
         self.active_mines = []
+        self.active_hazards = []
+        self.active_sigils = []
         self.enemy_turns_taken = 0
+        self.selected_battle_target = 0
         self.show_inventory = False
         self.show_bestiary = False
         self.gold = 100
@@ -3624,6 +4363,14 @@ class Game:
         self.shop_selection = 0
         self.bestiary_counts = {}
         self.bestiary_seen = set()
+        self.bestiary_elite_counts = {}
+        self.bestiary_elite_seen = set()
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        self.enemy_config_for_battle = None
+        self.battle_round = 0
+        self.battle_event_turn = 0
+        self.bosses_defeated = set()
+        self.next_forced_boss_id = None
         self._load_npcs()
         self.inventory_selection = 0
         self.attack_choice_deadline_ms = None
