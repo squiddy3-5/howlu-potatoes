@@ -33,6 +33,22 @@
         "Strange creatures lurk there."
       ],
       "shop": []
+    },
+    {
+      "id": "root_keeper",
+      "name": "Root Keeper",
+      "map_id": "root_home",
+      "grid_x": 10,
+      "grid_y": 10,
+      "color": [120, 255, 200],
+      "dialogue": [
+        "You have returned to Root Home.",
+        "I remember every time you fall.",
+        "The Mopo does not forget.",
+        "Who are you? I am the Root Keeper. I am the keeper of the Root Home.",
+        "Urghhh... not again... the memories..."
+      ],
+      "shop": []
     }
   ]
 }

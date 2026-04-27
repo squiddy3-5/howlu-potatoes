@@ -31,10 +31,26 @@ with open("items.json", "r") as f:
 pygame.init()
 
 # Constants
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 768
+DEFAULT_SCREEN_WIDTH = 1280
+DEFAULT_SCREEN_HEIGHT = 768
 FPS = 60
 TILE_SIZE = 32
+FULLSCREEN_MODE = True
+
+
+def _fit_window_to_display(width: int, height: int) -> tuple[int, int]:
+    """Choose fullscreen size or scale window to fit monitor."""
+    display_info = pygame.display.Info()
+    if FULLSCREEN_MODE:
+        return display_info.current_w, display_info.current_h
+    # Leave room for desktop bars/window decorations so content is not cut off.
+    max_width = max(960, display_info.current_w - 80)
+    max_height = max(600, display_info.current_h - 120)
+    scale = min(1.0, max_width / max(1, width), max_height / max(1, height))
+    return max(960, int(width * scale)), max(600, int(height * scale))
+
+
+SCREEN_WIDTH, SCREEN_HEIGHT = _fit_window_to_display(DEFAULT_SCREEN_WIDTH, DEFAULT_SCREEN_HEIGHT)
 
 # Terrain types (Pokemon-style)
 TERRAIN_GRASS = 0
@@ -80,8 +96,9 @@ DARK_RED = (139, 0, 0)
 
 #change this later bc for testing
 ATTACK_CHOICE_TIME_MS = 1000000
-GAME_VERSION = "0.11"
+GAME_VERSION = "0.14"
 ATTACK_PAGE_SIZE = 5
+SAVE_FILE_NAME = "savegame.json"
 BESTIARY_RANKS = [
     (1, "Potato Scout", 0),
     (2, "Spud Seeker", 4),
@@ -491,6 +508,153 @@ class GameState(Enum):
     PLAYER_WON = "player_won"
     PLAYER_LOST = "player_lost"
 
+
+class CharacterSelectionScreen:
+    """Modular character selection UI component."""
+
+    def __init__(self, characters: List[Dict], font_large: pygame.font.Font, font_small: pygame.font.Font):
+        self.font_large = font_large
+        self.font_small = font_small
+        self.characters: List[Dict] = []
+        self.selected_index = 0
+        self.scroll_index = 0
+        self.preview_sprites: Dict[str, Optional[pygame.Surface]] = {}
+        self.set_characters(characters)
+
+    def set_characters(self, characters: List[Dict]):
+        self.characters = characters or []
+        if not self.characters:
+            self.selected_index = 0
+            self.scroll_index = 0
+            return
+        self.selected_index = max(0, min(self.selected_index, len(self.characters) - 1))
+        self.scroll_index = max(0, min(self.scroll_index, self.selected_index))
+        self._refresh_sprite_cache()
+
+    def _refresh_sprite_cache(self):
+        self.preview_sprites = {}
+        for char in self.characters:
+            sprite_path = str(char.get("sprite_file", "")).strip()
+            char_id = str(char.get("id", char.get("name", "")))
+            self.preview_sprites[char_id] = load_sprite(sprite_path, fallback_size=(56, 56)) if sprite_path else None
+
+    def move_selection(self, delta: int):
+        if not self.characters:
+            self.selected_index = 0
+            return
+        self.selected_index = (self.selected_index + delta) % len(self.characters)
+
+    def _visible_row_count(self, surface_height: int) -> int:
+        panel_y = 112
+        row_h = 92
+        row_gap = 12
+        controls_y = surface_height - 34
+        available_height = max(0, controls_y - 16 - panel_y)
+        full_row_height = row_h + row_gap
+        return max(1, available_height // full_row_height)
+
+    def _ensure_selected_visible(self, visible_rows: int):
+        if visible_rows <= 0:
+            self.scroll_index = 0
+            return
+        max_start = max(0, len(self.characters) - visible_rows)
+        self.scroll_index = max(0, min(self.scroll_index, max_start))
+        if self.selected_index < self.scroll_index:
+            self.scroll_index = self.selected_index
+        elif self.selected_index >= self.scroll_index + visible_rows:
+            self.scroll_index = self.selected_index - visible_rows + 1
+        self.scroll_index = max(0, min(self.scroll_index, max_start))
+
+    def get_selected_character(self) -> Optional[Dict]:
+        if not self.characters:
+            return None
+        return self.characters[self.selected_index]
+
+    def handle_input(self, event: pygame.event.Event) -> Optional[Dict]:
+        if event.key in (pygame.K_UP, pygame.K_LEFT):
+            self.move_selection(-1)
+            return None
+        if event.key in (pygame.K_DOWN, pygame.K_RIGHT):
+            self.move_selection(1)
+            return None
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            return self.get_selected_character()
+        if event.key == pygame.K_ESCAPE:
+            return None
+        return None
+
+    def draw(self, surface: pygame.Surface):
+        surface.fill((18, 20, 28))
+
+        title = self.font_large.render("HOWLU'S QUEST FOR THE POTATO", True, (238, 238, 248))
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 34))
+        subtitle = self.font_small.render("Choose your character", True, (162, 168, 184))
+        surface.blit(subtitle, (SCREEN_WIDTH // 2 - subtitle.get_width() // 2, 68))
+
+        if not self.characters:
+            empty_text = self.font_small.render("No characters available.", True, WHITE)
+            surface.blit(empty_text, (SCREEN_WIDTH // 2 - empty_text.get_width() // 2, SCREEN_HEIGHT // 2))
+            return
+
+        panel_x = 88
+        panel_y = 112
+        panel_w = SCREEN_WIDTH - panel_x * 2
+        row_h = 92
+        row_gap = 12
+        visible_rows = self._visible_row_count(surface.get_height())
+        self._ensure_selected_visible(visible_rows)
+        start_index = self.scroll_index
+        end_index = min(len(self.characters), start_index + visible_rows)
+
+        for row_offset, index in enumerate(range(start_index, end_index)):
+            char = self.characters[index]
+            row_y = panel_y + row_offset * (row_h + row_gap)
+            selected = index == self.selected_index
+            row_rect = pygame.Rect(panel_x, row_y, panel_w, row_h)
+            bg_color = (50, 60, 85) if selected else (34, 40, 56)
+            border_color = (246, 214, 112) if selected else (90, 98, 122)
+            pygame.draw.rect(surface, bg_color, row_rect, border_radius=8)
+            pygame.draw.rect(surface, border_color, row_rect, 2, border_radius=8)
+
+            char_id = str(char.get("id", char.get("name", "")))
+            sprite = self.preview_sprites.get(char_id)
+            sprite_box = pygame.Rect(row_rect.x + 12, row_rect.y + 18, 56, 56)
+            pygame.draw.rect(surface, (24, 28, 40), sprite_box, border_radius=6)
+            pygame.draw.rect(surface, (120, 130, 160), sprite_box, 1, border_radius=6)
+            if sprite:
+                sprite_x = sprite_box.centerx - sprite.get_width() // 2
+                sprite_y = sprite_box.centery - sprite.get_height() // 2
+                surface.blit(sprite, (sprite_x, sprite_y))
+
+            name_color = (255, 241, 176) if selected else (232, 238, 250)
+            name_surface = self.font_small.render(str(char.get("name", "Unknown")), True, name_color)
+            surface.blit(name_surface, (row_rect.x + 82, row_rect.y + 12))
+
+            desc_surface = self.font_small.render(str(char.get("description", "")), True, (184, 194, 214))
+            surface.blit(desc_surface, (row_rect.x + 82, row_rect.y + 36))
+
+            stats = char.get("stats", {})
+            stats_text = (
+                f"STR {stats.get('strength', 0):.0f}  ATK {stats.get('attack', 0):.0f}  "
+                f"MAG {stats.get('magic_ability', 0):.0f}  DEF {stats.get('defense', 0):.0f}  "
+                f"SPD {stats.get('speed', 0):.0f}  HP {stats.get('max_hp', 0):.0f}"
+            )
+            stats_surface = self.font_small.render(stats_text, True, (158, 172, 198))
+            surface.blit(stats_surface, (row_rect.x + 82, row_rect.y + 60))
+
+        if start_index > 0:
+            top_hint = self.font_small.render("... more above ...", True, (134, 146, 172))
+            surface.blit(top_hint, (panel_x + panel_w - top_hint.get_width() - 8, panel_y - 24))
+        if end_index < len(self.characters):
+            bottom_y = panel_y + visible_rows * (row_h + row_gap) - 8
+            bottom_hint = self.font_small.render("... more below ...", True, (134, 146, 172))
+            surface.blit(bottom_hint, (panel_x + panel_w - bottom_hint.get_width() - 8, bottom_y))
+
+        version_text = self.font_small.render(f"v{GAME_VERSION}", True, (156, 164, 184))
+        surface.blit(version_text, (SCREEN_WIDTH - version_text.get_width() - 20, 20))
+        controls = self.font_small.render("Arrows: Move   Enter: Confirm   Ctrl+S: Load Save   Esc: Cancel", True, (156, 164, 184))
+        surface.blit(controls, (SCREEN_WIDTH // 2 - controls.get_width() // 2, SCREEN_HEIGHT - 34))
+
 def load_character_data():
     """Load character and enemy data from JSON file"""
     try:
@@ -568,7 +732,8 @@ def load_attack_visual_frames(filename: str, max_size: tuple = (260, 260)) -> tu
 
 class Game:
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        display_flags = pygame.FULLSCREEN if FULLSCREEN_MODE else 0
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), display_flags)
         pygame.display.set_caption("Potatoes for Howlu - a Game")
         self.clock = pygame.time.Clock()
         self.running = True
@@ -585,12 +750,20 @@ class Game:
         if self.character_data:
             self.available_characters = self.character_data.get("characters", [])
             self.enemy_data = self.character_data.get("enemies", [])
-            self.map_data = self.character_data.get("maps", [])
+            with open("maps.json", "r") as f:
+                map_data = json.load(f)
+            self.map_data = map_data.get("maps", [])
+            
         else:
             # Fallback to defaults
             self.available_characters = self._create_default_characters()
             self.enemy_data = self._create_default_enemies()
             self.map_data = self._create_default_maps()
+        self.character_selector = CharacterSelectionScreen(
+            self.available_characters,
+            self.font_large,
+            self.font_small,
+        )
         
         # Create player (will be initialized after character selection)
         self.player: Optional[Character] = None
@@ -668,7 +841,10 @@ class Game:
         self.next_forced_boss_id = None
         self.show_quit_confirm = False
         self.quit_confirm_choice = 1
+        self.show_save_confirm = False
+        self.save_confirm_choice = 1
         self.gold = 100
+        self.faction_progress: Dict[str, Dict[str, int]] = {}
         self.npcs = []
         self.active_npc = None
         self.npc_dialogue_index = 0
@@ -883,6 +1059,36 @@ class Game:
                 self._message(exit_info["label"], 120)
             return True
         return False
+    
+    def _check_map_boundaries(self):
+        current_map = self._current_map_info()
+        connections = current_map.get("connections", {})
+
+        # LEFT
+        if self.player_grid_x < 0:
+            if "left" in connections:
+                self._travel_to_map(connections["left"], "right_entry")
+            return True
+
+        # RIGHT
+        if self.player_grid_x >= self.map_width:
+            if "right" in connections:
+                self._travel_to_map(connections["right"], "left_entry")
+            return True
+
+        # UP
+        if self.player_grid_y < 0:
+            if "up" in connections:
+                self._travel_to_map(connections["up"], "down_entry")
+            return True
+
+        # DOWN
+        if self.player_grid_y >= self.map_height:
+            if "down" in connections:
+                self._travel_to_map(connections["down"], "up_entry")
+            return True
+
+        return False
 
     def _begin_explore_move(self, target_grid_x: int, target_grid_y: int) -> bool:
         if not self._tile_in_bounds(target_grid_x, target_grid_y):
@@ -907,7 +1113,7 @@ class Game:
         return pixel_x, pixel_y
 
     def _battle_log_rect(self) -> pygame.Rect:
-        return pygame.Rect(SCREEN_WIDTH - 400, 150, 360, 250)
+        return pygame.Rect(SCREEN_WIDTH - 400, 300, 360, 250)
 
     def _battle_arena_bounds(self) -> tuple[float, float, float, float]:
         log_rect = self._battle_log_rect()
@@ -1763,12 +1969,24 @@ class Game:
                     self.open_reset_confirmation()
                     continue
 
+                save_load_shortcut = event.key == pygame.K_s and (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META))
+                if save_load_shortcut:
+                    if self.state == GameState.EXPLORE:
+                        self.open_save_confirmation()
+                    elif self.state == GameState.CHARACTER_SELECT:
+                        self.load_game()
+                    continue
+
                 if self.show_quit_confirm:
                     self.handle_quit_confirmation_input(event)
                     continue
 
                 if self.show_reset_confirm:
                     self.handle_reset_confirmation_input(event)
+                    continue
+
+                if self.show_save_confirm:
+                    self.handle_save_confirmation_input(event)
                     continue
 
                 if self.show_inventory:
@@ -1783,15 +2001,11 @@ class Game:
                     continue
 
                 if self.state == GameState.CHARACTER_SELECT: 
-                    if event.key == pygame.K_UP:
-                        self.selected_character_index = (self.selected_character_index - 1) % len(self.available_characters)
-                    elif event.key == pygame.K_DOWN:
-                        self.selected_character_index = (self.selected_character_index + 1) % len(self.available_characters)
-                    elif event.key == pygame.K_SPACE:
-                        # Select character and start game
-                        selected_char = self.available_characters[self.selected_character_index]
+                    selected_char = self.character_selector.handle_input(event)
+                    self.selected_character_index = self.character_selector.selected_index
+                    if selected_char:
+                        # Selection component returns selected character; start logic stays here.
                         self.create_player_from_character(selected_char)
-                        #self.create_random_enemy()
                         self.state = GameState.EXPLORE
                 
                 elif self.state == GameState.EXPLORE:
@@ -1814,6 +2028,7 @@ class Game:
                                     self._message(f"Bought {items[chosen['item_id']]['name']} for {price}g!", 180)
                                 else:
                                     self._message("Not enough gold!", 150)
+                                    
                     elif self.active_npc:
                         if event.key in [pygame.K_ESCAPE]:
                             self.active_npc = None
@@ -1845,6 +2060,7 @@ class Game:
                             self.player_velocity[0] = -1
                         elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                             self.player_velocity[0] = 1
+                
                 
                 elif self.state == GameState.BATTLE:
                     # Movement in battle
@@ -1883,14 +2099,14 @@ class Game:
                 
                 elif self.state in [GameState.PLAYER_LOST]:
                     if event.key == pygame.K_SPACE:
-                        self.reset_game()
+                        self._return_to_root_home_after_faint()
                 elif self.state in [GameState.PLAYER_WON]:
                     if event.key == pygame.K_SPACE:
                         self.state = GameState.EXPLORE
             
             elif event.type == pygame.KEYUP:
                 # Stop movement
-                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_quit_confirm and not self.show_inventory and not self.show_bestiary:
+                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_quit_confirm and not self.show_save_confirm and not self.show_inventory and not self.show_bestiary:
                     if event.key in [pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s]:
                         self.player_velocity[1] = 0
                     elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d]:
@@ -1924,6 +2140,12 @@ class Game:
         self.player_velocity = [0, 0]
         self.enemy_velocity = [0, 0]
 
+    def open_save_confirmation(self):
+        self.show_save_confirm = True
+        self.save_confirm_choice = 1
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+
     def handle_reset_confirmation_input(self, event):
         if event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w]:
             self.reset_confirm_choice = 0
@@ -1939,6 +2161,22 @@ class Game:
             else:
                 self.show_reset_confirm = False
                 self.reset_confirm_choice = 1
+
+    def handle_save_confirmation_input(self, event):
+        if event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w]:
+            self.save_confirm_choice = 0
+        elif event.key in [pygame.K_RIGHT, pygame.K_d, pygame.K_DOWN, pygame.K_s]:
+            self.save_confirm_choice = 1
+        elif event.key in [pygame.K_ESCAPE, pygame.K_n]:
+            self.show_save_confirm = False
+            self.save_confirm_choice = 1
+        elif event.key in [pygame.K_RETURN, pygame.K_SPACE, pygame.K_y]:
+            if self.save_confirm_choice == 0:
+                self.show_save_confirm = False
+                self.save_game()
+            else:
+                self.show_save_confirm = False
+                self.save_confirm_choice = 1
 
     def player_recover(self):
         """High-risk recover: 65% chance to gain 2 AC, but skip turn"""
@@ -3718,7 +3956,6 @@ class Game:
             self.player.x = start_pixel_x + (target_pixel_x - start_pixel_x) * eased_progress
             self.player.y = start_pixel_y + (target_pixel_y - start_pixel_y) * eased_progress
             
-            # Check if reached target
             if self.player_move_progress >= 1.0:
                 self.player.x = target_pixel_x
                 self.player.y = target_pixel_y
@@ -3730,10 +3967,12 @@ class Game:
                 if self._tile_type_at(self.player_grid_x, self.player_grid_y) == TERRAIN_EXIT:
                     if self._activate_map_exit(self.player_grid_x, self.player_grid_y):
                         return
-                
-                # Check for random encounter (only when moving to new tile)
+
+                self._check_map_boundaries()
+
                 current_terrain = self.terrain_map[self.player_grid_y][self.player_grid_x]
                 encounter_chance = 0.00 if current_terrain == TERRAIN_NOSPAWN else (0.05 if current_terrain == TERRAIN_GRASS else 0.01)
+
                 if random.random() < encounter_chance:
                     self.create_random_enemy()
     
@@ -3812,48 +4051,14 @@ class Game:
 
         if self.show_reset_confirm:
             self.draw_reset_confirmation()
+
+        if self.show_save_confirm:
+            self.draw_save_confirmation()
     
     def draw_character_select(self):
-        """Draw character selection screen"""
-        title = self.font_large.render("HOWLU'S QUEST FOR THE POTATO", True, YELLOW)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 45))
-        version_text = self.font_small.render(f"Version {GAME_VERSION}", True, GRAY)
-        self.screen.blit(version_text, (SCREEN_WIDTH // 2 - version_text.get_width() // 2, 78))
-        
-        instructions = [
-            "UP/DOWN - Navigate",
-            "SPACE - Select Character",
-            "R - Recharge AC-65%"
-        ]
-        instruction_spacing = 30
-        instructions_height = len(instructions) * instruction_spacing
-        top_margin = 125
-        bottom_margin = 70 + instructions_height
-        available_height = max(220, SCREEN_HEIGHT - top_margin - bottom_margin)
-        row_height = max(62, min(88, available_height // max(1, len(self.available_characters))))
-        stat_offset = 28
-
-        char_y = top_margin
-        for i, char in enumerate(self.available_characters):
-            selected = i == self.selected_character_index
-            color = YELLOW if selected else WHITE
-            marker = ">>> " if selected else "    "
-            
-            name_text = self.font_small.render(f"{marker}{char['name']} - {char['description']}", True, color)
-            self.screen.blit(name_text, (100, char_y))
-            
-            stats = char["stats"]
-            stats_text = f"STR:{stats['strength']:.0f} ATK:{stats['attack']:.0f} MAG:{stats['magic_ability']:.0f} DEF:{stats['defense']:.0f} HP:{stats['max_hp']:.0f}"
-            stats_surface = self.font_small.render(stats_text, True, GRAY)
-            self.screen.blit(stats_surface, (150, char_y + stat_offset))
-            
-            char_y += row_height
-        
-        inst_y = SCREEN_HEIGHT - instructions_height - 55
-        for instruction in instructions:
-            text = self.font_small.render(instruction, True, WHITE)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, inst_y))
-            inst_y += instruction_spacing
+        """Draw modular character selection screen."""
+        self.character_selector.selected_index = self.selected_character_index
+        self.character_selector.draw(self.screen)
     
     def draw_explore(self):
         """Draw exploration screen with terrain map and player"""
@@ -3982,10 +4187,11 @@ class Game:
             "WASD/Arrows - Move",
             "I - Open Inventory / Equipment",
             "B - Open Bestiary",
-            "Use doors/exits to change maps"
+            "Use doors/exits to change maps",
+            "Ctrl+S Save (Explore only)",
         ]
         panel_width = 320
-        panel_height = 122
+        panel_height = 146
         panel_x = SCREEN_WIDTH - panel_width - 12
         panel_y = 8
         panel_surface = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
@@ -4090,16 +4296,11 @@ class Game:
         player_name_x = max(20, min(self.player.x - player_name.get_width() // 2 + self.player.width // 2, SCREEN_WIDTH - player_name.get_width() - 20))
         self.screen.blit(player_name, (player_name_x, self.player.y + self.player.height + 5))
         
-        enemy_name = self.font_small.render(f"{self.enemy.name}", True, RED)
-        enemy_name_x = max(20, min(self.enemy.x - enemy_name.get_width() // 2 + self.enemy.width // 2, SCREEN_WIDTH - enemy_name.get_width() - 20))
-        self.screen.blit(enemy_name, (enemy_name_x, self.enemy.y + self.enemy.height + 5))
-        
         # Draw HP values
         player_hp = self.font_small.render(f"HP: {self.player.stats.current_hp:.0f}/{self.player.stats.max_hp:.0f}", True, WHITE)
         self.screen.blit(player_hp, (20, 20))
         
         enemy_hp = self.font_small.render(f"HP: {self.enemy.stats.current_hp:.0f}/{self.enemy.stats.max_hp:.0f}", True, WHITE)
-        self.screen.blit(enemy_hp, (SCREEN_WIDTH - enemy_hp.get_width() - 20, 20))
         terrain_text = self.font_small.render(
             f"Terrain: {self.battle_terrain.title()} | {self.battle_time_of_day.title()}",
             True,
@@ -4151,11 +4352,33 @@ class Game:
             dodge_y = 380 if extra_player_flags and self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else (350 if self.state == GameState.BATTLE and self.attack_choice_deadline_ms is not None else 320)
             dodge_text = self.font_small.render("Dodge: ready", True, YELLOW)
             self.screen.blit(dodge_text, (20, dodge_y))
+        right_hud_rect = pygame.Rect(SCREEN_WIDTH - 400, 18, 360, 260)
+        right_hud_surface = pygame.Surface((right_hud_rect.width, right_hud_rect.height), pygame.SRCALPHA)
+        right_hud_surface.fill((16, 18, 30, 220))
+        self.screen.blit(right_hud_surface, right_hud_rect.topleft)
+        pygame.draw.rect(self.screen, (225, 196, 92), right_hud_rect, 3)
+
+        right_hud_title = self.font_small.render("ENEMY HUD", True, (255, 236, 160))
+        self.screen.blit(right_hud_title, (right_hud_rect.x + 12, right_hud_rect.y + 10))
+        enemy_title_text = self.font_small.render(f"{self.enemy.name}  Lv.{self.enemy.level}", True, (255, 120, 120))
+        self.screen.blit(enemy_title_text, (right_hud_rect.x + 12, right_hud_rect.y + 36))
+
+        enemy_hp_x = right_hud_rect.x + 12
+        enemy_hp_y = right_hud_rect.y + 62
+        self.screen.blit(enemy_hp, (enemy_hp_x, enemy_hp_y))
+
+        enemy_hp_ratio = 0.0 if self.enemy.stats.max_hp <= 0 else self.enemy.stats.current_hp / self.enemy.stats.max_hp
+        enemy_hp_bar_rect = pygame.Rect(enemy_hp_x, enemy_hp_y + 22, right_hud_rect.width - 24, 12)
+        pygame.draw.rect(self.screen, (60, 32, 32), enemy_hp_bar_rect)
+        pygame.draw.rect(self.screen, (220, 72, 72), (enemy_hp_bar_rect.x, enemy_hp_bar_rect.y, int(enemy_hp_bar_rect.width * enemy_hp_ratio), enemy_hp_bar_rect.height))
+        pygame.draw.rect(self.screen, (238, 220, 210), enemy_hp_bar_rect, 1)
+
+        hud_info_y = enemy_hp_bar_rect.y + enemy_hp_bar_rect.height + 10
         if self.enemy.status_effects:
             enemy_status = ", ".join(f"{name}:{turns}" for name, turns in self.enemy.status_effects.items())
-            enemy_status_text = self.font_small.render(f"Enemy: {enemy_status}", True, WHITE)
-            enemy_status_x = max(20, SCREEN_WIDTH - enemy_status_text.get_width() - 20)
-            self.screen.blit(enemy_status_text, (enemy_status_x, 50))
+            enemy_status_text = self.font_small.render(f"Status: {enemy_status}", True, WHITE)
+            self.screen.blit(enemy_status_text, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         extra_enemy_flags = []
         if self.enemy.mirror_peel_turns > 0:
             extra_enemy_flags.append(f"mirror:{self.enemy.mirror_peel_turns}")
@@ -4164,37 +4387,36 @@ class Game:
         if self.enemy.hot_potato_turns > 0:
             extra_enemy_flags.append(f"hot potato:{self.enemy.hot_potato_turns}")
         if extra_enemy_flags:
-            extra_enemy_text = self.font_small.render(f"Enemy FX: {', '.join(extra_enemy_flags)}", True, WHITE)
-            extra_enemy_x = max(20, SCREEN_WIDTH - extra_enemy_text.get_width() - 20)
-            self.screen.blit(extra_enemy_text, (extra_enemy_x, 80))
+            extra_enemy_text = self.font_small.render(f"Effects: {', '.join(extra_enemy_flags)}", True, (214, 224, 240))
+            self.screen.blit(extra_enemy_text, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         if self.enemy.intent_data:
             intent_label = str(self.enemy.intent_data.get("label", "Waiting"))
             intent_type = str(self.enemy.intent_data.get("type", "attack")).title()
             intent_surface = self.font_small.render(f"Intent: {intent_type} - {intent_label}", True, (255, 214, 120))
-            intent_x = max(20, SCREEN_WIDTH - intent_surface.get_width() - 20)
-            self.screen.blit(intent_surface, (intent_x, 110))
+            self.screen.blit(intent_surface, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         if self.enemy.armor_layers > 0:
             armor_surface = self.font_small.render(f"Armor Plates: {self.enemy.armor_layers}", True, (204, 220, 240))
-            armor_x = max(20, SCREEN_WIDTH - armor_surface.get_width() - 20)
-            self.screen.blit(armor_surface, (armor_x, 140))
+            self.screen.blit(armor_surface, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         if self.enemy.puzzle_sigils > 0:
             sigil_surface = self.font_small.render(f"Barrier Anchors: {self.enemy.puzzle_sigils}", True, (194, 160, 255))
-            sigil_x = max(20, SCREEN_WIDTH - sigil_surface.get_width() - 20)
-            self.screen.blit(sigil_surface, (sigil_x, 170))
+            self.screen.blit(sigil_surface, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         if self.encounter_objective.get("type") == "survive":
             survive_surface = self.font_small.render(
                 f"Survive: {self.survive_turn_progress}/{self.survive_turn_goal}",
                 True,
                 (150, 226, 223),
             )
-            survive_x = max(20, SCREEN_WIDTH - survive_surface.get_width() - 20)
-            self.screen.blit(survive_surface, (survive_x, 200))
+            self.screen.blit(survive_surface, (right_hud_rect.x + 12, hud_info_y))
+            hud_info_y += 22
         
         # Draw attack options with controls
         if current_target:
             target_surface = self.font_small.render(f"Target: {self._battle_target_name(current_target)}", True, (255, 230, 118))
-            target_x = max(20, SCREEN_WIDTH - target_surface.get_width() - 20)
-            self.screen.blit(target_surface, (target_x, 230))
+            self.screen.blit(target_surface, (right_hud_rect.x + 12, right_hud_rect.bottom - 26))
         attack_y = SCREEN_HEIGHT - 190
         current_page = self._current_attack_page(self.player)
         max_page = self._max_attack_page(self.player)
@@ -4243,8 +4465,8 @@ class Game:
         log_rect = self._battle_log_rect()
         log_x = log_rect.x
         log_y = log_rect.y
-        pygame.draw.rect(self.screen, (22, 22, 32), log_rect)
-        pygame.draw.rect(self.screen, (110, 110, 140), log_rect, 2)
+        pygame.draw.rect(self.screen, (18, 20, 32), log_rect)
+        pygame.draw.rect(self.screen, (158, 158, 198), log_rect, 2)
         log_title = self.font_small.render("Battle Log", True, YELLOW)
         self.screen.blit(log_title, (log_x + 12, log_y + 10))
 
@@ -4278,6 +4500,37 @@ class Game:
 
         yes_color = YELLOW if self.reset_confirm_choice == 0 else WHITE
         no_color = YELLOW if self.reset_confirm_choice == 1 else WHITE
+        yes_text = self.font_large.render("[ Yes ]", True, yes_color)
+        no_text = self.font_large.render("[ No ]", True, no_color)
+        self.screen.blit(yes_text, (box_x + 110, box_y + 145))
+        self.screen.blit(no_text, (box_x + box_width - no_text.get_width() - 110, box_y + 145))
+
+        hint = self.font_small.render("Use A/D or arrows, then Enter or Space", True, GRAY)
+        hint_x = SCREEN_WIDTH // 2 - hint.get_width() // 2
+        self.screen.blit(hint, (hint_x, box_y + 185))
+
+    def draw_save_confirmation(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 520
+        box_height = 220
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+        pygame.draw.rect(self.screen, (35, 50, 55), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+
+        title = self.font_large.render("Save Current Progress?", True, YELLOW)
+        title_x = SCREEN_WIDTH // 2 - title.get_width() // 2
+        self.screen.blit(title, (title_x, box_y + 30))
+
+        body = self.font_small.render("This will overwrite the existing save file.", True, WHITE)
+        body_x = SCREEN_WIDTH // 2 - body.get_width() // 2
+        self.screen.blit(body, (body_x, box_y + 85))
+
+        yes_color = YELLOW if self.save_confirm_choice == 0 else WHITE
+        no_color = YELLOW if self.save_confirm_choice == 1 else WHITE
         yes_text = self.font_large.render("[ Yes ]", True, yes_color)
         no_text = self.font_large.render("[ No ]", True, no_color)
         self.screen.blit(yes_text, (box_x + 110, box_y + 145))
@@ -4326,15 +4579,39 @@ class Game:
         self.screen.blit(continue_text, (SCREEN_WIDTH // 2 - continue_text.get_width() // 2, 200))
     
     def draw_defeat_screen(self):
-        defeat_text = self.font_large.render("DEFEAT!", True, RED)
-        self.screen.blit(defeat_text, (SCREEN_WIDTH // 2 - defeat_text.get_width() // 2, 100))
-        
-        continue_text = self.font_small.render("Press SPACE to try again", True, WHITE)
-        self.screen.blit(continue_text, (SCREEN_WIDTH // 2 - continue_text.get_width() // 2, 200))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 640
+        box_height = 270
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+
+        panel = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        panel.fill((30, 16, 20, 235))
+        self.screen.blit(panel, (box_x, box_y))
+        pygame.draw.rect(self.screen, (192, 76, 76), (box_x, box_y, box_width, box_height), 3)
+
+        defeat_text = self.font_large.render("DEFEAT", True, (255, 108, 108))
+        self.screen.blit(defeat_text, (SCREEN_WIDTH // 2 - defeat_text.get_width() // 2, box_y + 30))
+
+        subtitle = self.font_small.render("Your journey pauses here, but the roots remember you.", True, (230, 214, 214))
+        self.screen.blit(subtitle, (SCREEN_WIDTH // 2 - subtitle.get_width() // 2, box_y + 90))
+
+        tip = self.font_small.render("You will wake in Root Home with full health.", True, (194, 180, 180))
+        self.screen.blit(tip, (SCREEN_WIDTH // 2 - tip.get_width() // 2, box_y + 126))
+
+        continue_text = self.font_small.render("Press SPACE to wake at Root Home", True, (255, 232, 160))
+        self.screen.blit(continue_text, (SCREEN_WIDTH // 2 - continue_text.get_width() // 2, box_y + 185))
+
+        hint = self.font_small.render("Tip: Save in exploration (Ctrl+S) before difficult fights.", True, (156, 148, 148))
+        self.screen.blit(hint, (SCREEN_WIDTH // 2 - hint.get_width() // 2, box_y + 220))
     
     def reset_game(self):
         """Reset game for a new battle or back to character select"""
         self.selected_character_index = 0
+        self.character_selector.selected_index = 0
         self.state = GameState.CHARACTER_SELECT
         self.selected_attack = 0
         self.player = None
@@ -4356,6 +4633,7 @@ class Game:
         self.show_inventory = False
         self.show_bestiary = False
         self.gold = 100
+        self.faction_progress = {}
         self.npcs = []
         self.active_npc = None
         self.npc_dialogue_index = 0
@@ -4376,8 +4654,294 @@ class Game:
         self.attack_choice_deadline_ms = None
         self.show_quit_confirm = False
         self.quit_confirm_choice = 1
+        self.show_save_confirm = False
+        self.save_confirm_choice = 1
         self.show_reset_confirm = False
         self.reset_confirm_choice = 1
+
+    def _return_to_root_home_after_faint(self):
+        if not self.player:
+            self.reset_game()
+            return
+        root_map_index = self._map_index_by_id("root_home")
+        if root_map_index is None:
+            try:
+                with open("maps.json", "r") as f:
+                    map_data = json.load(f)
+                loaded_maps = map_data.get("maps", [])
+                if loaded_maps:
+                    self.map_data = loaded_maps
+                    root_map_index = self._map_index_by_id("root_home")
+            except (FileNotFoundError, json.JSONDecodeError):
+                root_map_index = None
+        if root_map_index is not None:
+            self._travel_to_map(root_map_index, "from_faint")
+        else:
+            self.current_map_index = 0
+            self.terrain_map = self._load_current_map()
+            self.player_grid_x = max(0, min(self.player_grid_x, self.map_width - 1))
+            self.player_grid_y = max(0, min(self.player_grid_y, self.map_height - 1))
+            self.player.x, self.player.y = self._grid_to_pixel_position(
+                self.player_grid_x,
+                self.player_grid_y,
+                self.player.width,
+                self.player.height,
+            )
+        self.enemy = None
+        self.player.stats.current_hp = self.player.stats.max_hp
+        self.player.status_effects = {}
+        self.player.pending_charge_attack_id = None
+        self.player.pending_charge_turns = 0
+        self.player.movement_lock_frames = 0
+        self.player.next_dodge_chance = 0.0
+        self.player_velocity = [0, 0]
+        self.player_motion = [0.0, 0.0]
+        self.enemy_velocity = [0, 0]
+        self.active_attack_cutscene = None
+        self.active_mines = []
+        self.active_hazards = []
+        self.active_sigils = []
+        self.enemy_turns_taken = 0
+        self.selected_battle_target = 0
+        self.attack_choice_deadline_ms = None
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        self.enemy_config_for_battle = None
+        self.show_inventory = False
+        self.show_bestiary = False
+        self.show_shop = False
+        self.active_npc = None
+        self.npc_dialogue_index = 0
+        self.state = GameState.EXPLORE
+        self.messages = []
+        self._message("You awaken in Root Home.", 220)
+
+    def _save_file_path(self) -> str:
+        return os.path.join(os.getcwd(), SAVE_FILE_NAME)
+
+    def _serialize_character(self, character: Character) -> Dict:
+        return {
+            "character_id": character.character_id,
+            "name": character.name,
+            "description": character.description,
+            "types": list(character.types),
+            "color": list(character.color),
+            "level": int(character.level),
+            "bestiary_title": character.bestiary_title,
+            "enemy_defeats": int(character.enemy_defeats),
+            "experience": int(character.experience),
+            "ability_charges": int(character.ability_charges),
+            "max_ability_charges": int(character.max_ability_charges),
+            "stats": {
+                "strength": float(character.stats.strength),
+                "attack": float(character.stats.attack),
+                "magic_ability": float(character.stats.magic_ability),
+                "defense": float(character.stats.defense),
+                "speed": float(character.stats.speed),
+                "max_hp": float(character.stats.max_hp),
+                "current_hp": float(character.stats.current_hp),
+            },
+            "attack_ids": list(character.attack_ids),
+            "cooldowns": {attack_id: int(value) for attack_id, value in character.cooldowns.items()},
+            "status_effects": {name: int(turns) for name, turns in character.status_effects.items()},
+            "defense_bonus": float(character.defense_bonus),
+            "dodge_chance": float(character.dodge_chance),
+            "next_dodge_chance": float(character.next_dodge_chance),
+            "fire_shield_turns": int(character.fire_shield_turns),
+            "fire_shield_damage": float(character.fire_shield_damage),
+            "counter_turns": int(character.counter_turns),
+            "mirror_peel_turns": int(character.mirror_peel_turns),
+            "gravy_ward_turns": int(character.gravy_ward_turns),
+            "gravy_ward_heal": float(character.gravy_ward_heal),
+            "hot_potato_turns": int(character.hot_potato_turns),
+            "hot_potato_damage": float(character.hot_potato_damage),
+            "damage_bonus_multiplier": float(character.damage_bonus_multiplier),
+            "armor_layers": int(character.armor_layers),
+        }
+
+    def _deserialize_character(self, data: Dict) -> Character:
+        stats_data = data.get("stats", {})
+        stats = Stats(
+            strength=float(stats_data.get("strength", 50)),
+            attack=float(stats_data.get("attack", 50)),
+            magic_ability=float(stats_data.get("magic_ability", 50)),
+            defense=float(stats_data.get("defense", 20)),
+            speed=float(stats_data.get("speed", 50)),
+            max_hp=float(stats_data.get("max_hp", 150)),
+        )
+        stats.current_hp = float(stats_data.get("current_hp", stats.max_hp))
+
+        sprite = None
+        character_id = str(data.get("character_id", ""))
+        for candidate in self.available_characters:
+            if candidate.get("id") == character_id and candidate.get("sprite_file"):
+                sprite = load_sprite(candidate["sprite_file"])
+                break
+
+        color_list = data.get("color", [0, 100, 255])
+        color = tuple(color_list) if isinstance(color_list, list) and len(color_list) >= 3 else (0, 100, 255)
+        restored = Character(
+            str(data.get("name", "Player")),
+            0,
+            0,
+            stats,
+            color,
+            sprite,
+        )
+        restored.character_id = character_id or restored.name.lower()
+        restored.description = str(data.get("description", ""))
+        restored.types = parse_type_list(data.get("types"))
+        restored.level = int(data.get("level", 1))
+        restored.bestiary_title = str(data.get("bestiary_title", BESTIARY_RANKS[0][1]))
+        restored.enemy_defeats = int(data.get("enemy_defeats", 0))
+        restored.experience = int(data.get("experience", 0))
+        restored.ability_charges = int(data.get("ability_charges", 3))
+        restored.max_ability_charges = int(data.get("max_ability_charges", 3))
+        restored.attack_ids = [attack_id for attack_id in data.get("attack_ids", []) if attack_id in attacks]
+        restored.cooldowns = {attack_id: int(value) for attack_id, value in data.get("cooldowns", {}).items()}
+        for attack_id in restored.attack_ids:
+            restored.cooldowns.setdefault(attack_id, 0)
+        restored.status_effects = {str(name): int(turns) for name, turns in data.get("status_effects", {}).items()}
+        restored.defense_bonus = float(data.get("defense_bonus", 0))
+        restored.dodge_chance = float(data.get("dodge_chance", 0.0))
+        restored.next_dodge_chance = float(data.get("next_dodge_chance", 0.0))
+        restored.fire_shield_turns = int(data.get("fire_shield_turns", 0))
+        restored.fire_shield_damage = float(data.get("fire_shield_damage", 8))
+        restored.counter_turns = int(data.get("counter_turns", 0))
+        restored.mirror_peel_turns = int(data.get("mirror_peel_turns", 0))
+        restored.gravy_ward_turns = int(data.get("gravy_ward_turns", 0))
+        restored.gravy_ward_heal = float(data.get("gravy_ward_heal", 18))
+        restored.hot_potato_turns = int(data.get("hot_potato_turns", 0))
+        restored.hot_potato_damage = float(data.get("hot_potato_damage", 0))
+        restored.damage_bonus_multiplier = float(data.get("damage_bonus_multiplier", 1.0))
+        restored.armor_layers = int(data.get("armor_layers", 0))
+        return restored
+
+    def save_game(self):
+        if not self.player:
+            self._message("No active run to save yet.", 180)
+            return
+        if self.state != GameState.EXPLORE:
+            self._message("You can only save during exploration.", 200)
+            return
+        save_data = {
+            "version": GAME_VERSION,
+            "saved_at": int(time.time()),
+            "state": "explore",
+            "current_map_index": int(self.current_map_index),
+            "player_grid_x": int(self.player_grid_x),
+            "player_grid_y": int(self.player_grid_y),
+            "gold": int(self.gold),
+            "inventory": {item_id: int(amount) for item_id, amount in self.inventory.items()},
+            "equipment_slots": dict(self.equipment_slots),
+            "bestiary_counts": {enemy_id: int(count) for enemy_id, count in self.bestiary_counts.items()},
+            "bestiary_seen": sorted(self.bestiary_seen),
+            "bestiary_elite_counts": {enemy_id: int(count) for enemy_id, count in self.bestiary_elite_counts.items()},
+            "bestiary_elite_seen": sorted(self.bestiary_elite_seen),
+            "bosses_defeated": sorted(self.bosses_defeated),
+            "faction_progress": self.faction_progress,
+            "player": self._serialize_character(self.player),
+        }
+        try:
+            with open(self._save_file_path(), "w") as f:
+                json.dump(save_data, f, indent=2)
+            self._message("Game saved! (Ctrl+S to load at character select)", 220)
+        except OSError as exc:
+            self._message(f"Save failed: {exc}", 220)
+
+    def load_game(self):
+        if self.state != GameState.CHARACTER_SELECT:
+            self._message("Load is only available at character select.", 200)
+            return
+        save_path = self._save_file_path()
+        if not os.path.exists(save_path):
+            self._message("No save file found yet.", 180)
+            return
+        try:
+            with open(save_path, "r") as f:
+                save_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            self._message(f"Load failed: {exc}", 220)
+            return
+
+        player_data = save_data.get("player")
+        if not isinstance(player_data, dict):
+            self._message("Load failed: save data is missing player info.", 220)
+            return
+        try:
+            self.player = self._deserialize_character(player_data)
+        except Exception as exc:
+            self._message(f"Load failed: {exc}", 220)
+            return
+
+        self.current_map_index = max(0, min(int(save_data.get("current_map_index", 0)), max(0, len(self.map_data) - 1)))
+        self.terrain_map = self._load_current_map()
+        self.player_grid_x = max(0, min(int(save_data.get("player_grid_x", self.map_width // 2)), self.map_width - 1))
+        self.player_grid_y = max(0, min(int(save_data.get("player_grid_y", self.map_height // 2)), self.map_height - 1))
+        self.player_target_x = self.player_grid_x
+        self.player_target_y = self.player_grid_y
+        self.player_move_start_x = self.player_grid_x
+        self.player_move_start_y = self.player_grid_y
+        self.player_move_progress = 0.0
+        self.player_moving = False
+        self.player.x, self.player.y = self._grid_to_pixel_position(
+            self.player_grid_x,
+            self.player_grid_y,
+            self.player.width,
+            self.player.height,
+        )
+
+        self.inventory = {
+            item_id: int(amount)
+            for item_id, amount in save_data.get("inventory", {}).items()
+            if item_id in items and int(amount) > 0
+        }
+        loaded_slots = save_data.get("equipment_slots", {})
+        self.equipment_slots = {
+            "helmet": loaded_slots.get("helmet"),
+            "armor": loaded_slots.get("armor"),
+            "accessory": loaded_slots.get("accessory"),
+            "relic": loaded_slots.get("relic"),
+        }
+        self.gold = int(save_data.get("gold", 0))
+        self.bestiary_counts = {enemy_id: int(count) for enemy_id, count in save_data.get("bestiary_counts", {}).items()}
+        self.bestiary_seen = set(str(enemy_id) for enemy_id in save_data.get("bestiary_seen", []))
+        self.bestiary_elite_counts = {enemy_id: int(count) for enemy_id, count in save_data.get("bestiary_elite_counts", {}).items()}
+        self.bestiary_elite_seen = set(str(enemy_id) for enemy_id in save_data.get("bestiary_elite_seen", []))
+        self.bosses_defeated = set(str(enemy_id) for enemy_id in save_data.get("bosses_defeated", []))
+        self.faction_progress = dict(save_data.get("faction_progress", {}))
+
+        self.enemy = None
+        self.state = GameState.EXPLORE
+        self.messages = []
+        self.selected_attack = 0
+        self.active_attack_cutscene = None
+        self.active_mines = []
+        self.active_hazards = []
+        self.active_sigils = []
+        self.enemy_turns_taken = 0
+        self.selected_battle_target = 0
+        self.player_velocity = [0, 0]
+        self.player_motion = [0.0, 0.0]
+        self.enemy_velocity = [0, 0]
+        self.attack_choice_deadline_ms = None
+        self.show_inventory = False
+        self.inventory_selection = 0
+        self.show_bestiary = False
+        self.bestiary_selection = 0
+        self.bestiary_page = 0
+        self.show_shop = False
+        self.active_npc = None
+        self.npc_dialogue_index = 0
+        self.show_quit_confirm = False
+        self.quit_confirm_choice = 1
+        self.show_save_confirm = False
+        self.save_confirm_choice = 1
+        self.show_reset_confirm = False
+        self.reset_confirm_choice = 1
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        self.enemy_config_for_battle = None
+        self.next_forced_boss_id = None
+        self._message("Save loaded!", 220)
     
     def run(self):
         while self.running:

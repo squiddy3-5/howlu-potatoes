@@ -1,0 +1,166 @@
+{
+    "maps": [
+      {
+        "id": "starting_town",
+        "name": "Starting Town",
+        "entries": [
+          {
+            "id": "town_center",
+            "grid_x": 15,
+            "grid_y": 10
+          },
+          {
+            "id": "from_forest",
+            "grid_x": 28,
+            "grid_y": 10
+          },
+          {
+            "id": "from_root_home",
+            "grid_x": 15,
+            "grid_y": 18
+          }
+        ],
+        "exits": [
+          {
+            "grid_x": 29,
+            "grid_y": 10,
+            "target_map_id": "forest_path",
+            "target_entry_id": "from_town",
+            "label": "You head out toward the forest."
+          },
+          {
+            "grid_x": 15,
+            "grid_y": 19,
+            "target_map_id": "root_home",
+            "target_entry_id": "from_faint",
+            "label": "A strange pull guides you elsewhere..."
+          }
+        ],
+        "layout": [
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B..................................",
+          "B..................................",
+          "B.................................B",
+          "B.................................B",
+          "B.................................B",
+          "B.........NNNNNNNN................B",
+          "B.........N......N................B",
+          "B.........N..NN..N................B",
+          "B.........N.NNNN.N................B",
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        ],
+        "legend": {
+          ".": "grass",
+          "B": "building",
+          "P": "path",
+          "W": "water",
+          "T": "tree"
+        }
+      },
+      {
+        "id": "forest_path",
+        "name": "Forest Path",
+        "entries": [
+          {
+            "id": "from_town",
+            "grid_x": 1,
+            "grid_y": 10
+          }
+        ],
+        "exits": [
+          {
+            "grid_x": 0,
+            "grid_y": 10,
+            "target_map_id": "starting_town",
+            "target_entry_id": "from_forest",
+            "label": "You return to town."
+          }
+        ],
+        "layout": [
+          "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          ".............................T",
+          ".............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "T............................T",
+          "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+        ],
+        "legend": {
+          ".": "grass",
+          "T": "tree"
+        }
+      },
+      {
+        "id": "root_home",
+        "name": "Root Home",
+        "safe_zone": true,
+        "entries": [
+          {
+            "id": "from_faint",
+            "grid_x": 15,
+            "grid_y": 18
+          }
+        ],
+        "exits": [
+          {
+            "grid_x": 15,
+            "grid_y": 19,
+            "target_map_id": "starting_town",
+            "target_entry_id": "from_root_home",
+            "label": "You return to the world."
+          }
+        ],
+        "layout": [
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "B............TTTT............B",
+          "B...........T....T...........B",
+          "B..........T......T..........B",
+          "B.........T........T.........B",
+          "B........T..........T........B",
+          "B.......T............T.......B",
+          "B......T..............T......B",
+          "B.....T................T.....B",
+          "B....T..................T....B",
+          "B...T..........E........T....B",
+          "B....T..................T....B",
+          "B.....T................T.....B",
+          "B......T..............T......B",
+          "B.......T............T.......B",
+          "B........T..........T........B",
+          "B.........T........T.........B",
+          "B..........T......T..........B",
+          "B...........T..R..T..........B",
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        ],
+        "legend": {
+          ".": "floor",
+          "B": "boundary",
+          "T": "root_tree",
+          "R": "root_core",
+          "E": "exit"
+        }
+      }
+    ]
+  }
