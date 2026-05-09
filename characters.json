@@ -559,112 +559,168 @@
         1,
         2
       ]
-    }
-  ],
-  "maps": [
-    {
-      "id": "starting_town",
-      "name": "Starting Town",
-      "entries": [
-        {
-          "id": "town_center",
-          "grid_x": 15,
-          "grid_y": 10
-        },
-        {
-          "id": "from_forest",
-          "grid_x": 28,
-          "grid_y": 10
-        }
-      ],
-      "exits": [
-        {
-          "grid_x": 29,
-          "grid_y": 10,
-          "target_map_id": "forest_path",
-          "target_entry_id": "from_town",
-          "label": "You head out toward the forest."
-        }
-      ],
-      "layout": [
-        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................E",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B............................B",
-        "B.........NNNNNNNN...........B",
-        "B.........N......N...........B",
-        "B.........N..NN..N...........B",
-        "B.........N.NNNN.N...........B",
-        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-      ],
-      "legend": {
-        ".": "grass",
-        "B": "building",
-        "P": "path",
-        "W": "water",
-        "T": "tree"
-      }
     },
     {
-      "id": "forest_path",
-      "name": "Forest Path",
-      "entries": [
-        {
-          "id": "from_town",
-          "grid_x": 1,
-          "grid_y": 10
-        }
+      "id": "mopo_fragment",
+      "name": "Mopo Fragment",
+      "description": "A shard of Potato Moon memory trying to stabilize itself.",
+      "types": ["potato", "crystal"],
+      "xp_reward": 90,
+      "stats": {
+        "strength": 30,
+        "attack": 34,
+        "magic_ability": 88,
+        "defense": 18,
+        "speed": 70,
+        "max_hp": 190
+      },
+      "color": [210, 190, 110],
+      "attack_ids": [
+        "potato_shard",
+        "crystal_shard",
+        "mirror_peel"
       ],
-      "exits": [
-        {
-          "grid_x": 0,
-          "grid_y": 10,
-          "target_map_id": "starting_town",
-          "target_entry_id": "from_forest",
-          "label": "You return to town."
-        }
+      "drop_pool": [
+        "small_potion",
+        "spark_tonic",
+        "lucky_potato"
       ],
-      "layout": [
-        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "E............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "T............................T",
-        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      "drop_count_range": [1, 2]
+    },
+    {
+      "id": "cooked_mind",
+      "name": "Cooked Mind",
+      "description": "A failed recipe that remembers enough to question its orders.",
+      "types": ["fire", "void"],
+      "xp_reward": 130,
+      "stats": {
+        "strength": 42,
+        "attack": 52,
+        "magic_ability": 84,
+        "defense": 22,
+        "speed": 58,
+        "max_hp": 250
+      },
+      "color": [228, 138, 86],
+      "attack_ids": [
+        "fireball",
+        "void_pull",
+        "cooldown_drain"
       ],
-      "legend": {
-        ".": "grass",
-        "B": "building",
-        "P": "path",
-        "W": "water",
-        "T": "tree",
-        "N": "enemies_noSpawn"
-      }
+      "drop_pool": [
+        "small_potion",
+        "mystery_gravy",
+        "ember_seed"
+      ],
+      "drop_count_range": [1, 2]
+    },
+    {
+      "id": "steam_mimic",
+      "name": "Steam Mimic",
+      "description": "An infiltrator recipe that copies voices, movement, and intent.",
+      "types": ["water", "void"],
+      "xp_reward": 170,
+      "stats": {
+        "strength": 48,
+        "attack": 62,
+        "magic_ability": 92,
+        "defense": 20,
+        "speed": 88,
+        "max_hp": 230
+      },
+      "color": [185, 212, 220],
+      "attack_ids": [
+        "steam_burst",
+        "mirror_peel",
+        "tether_lash"
+      ],
+      "drop_pool": [
+        "spark_tonic",
+        "mystery_gravy",
+        "swift_feather"
+      ],
+      "drop_count_range": [1, 2]
+    },
+    {
+      "id": "sear_unit",
+      "name": "Sear Unit",
+      "description": "An Armada frontline recipe made to burn resistance out of the terrain.",
+      "types": ["fire", "metal"],
+      "xp_reward": 180,
+      "stats": {
+        "strength": 78,
+        "attack": 86,
+        "magic_ability": 62,
+        "defense": 36,
+        "speed": 64,
+        "max_hp": 310
+      },
+      "color": [238, 92, 58],
+      "attack_ids": [
+        "fireball",
+        "magma_coat",
+        "iron_maelstrom"
+      ],
+      "drop_pool": [
+        "ember_seed",
+        "iron_bark",
+        "large_potion"
+      ],
+      "drop_count_range": [1, 2]
+    },
+    {
+      "id": "broth_guardian",
+      "name": "Broth Guardian",
+      "description": "A defensive Armada unit that tries to stabilize battlefield zones by force.",
+      "types": ["water", "metal", "potato"],
+      "xp_reward": 190,
+      "stats": {
+        "strength": 68,
+        "attack": 58,
+        "magic_ability": 72,
+        "defense": 62,
+        "speed": 34,
+        "max_hp": 390
+      },
+      "color": [112, 158, 210],
+      "attack_ids": [
+        "shield_wall",
+        "water_blast",
+        "gravy_ward"
+      ],
+      "drop_pool": [
+        "iron_bark",
+        "large_potion",
+        "mystery_gravy"
+      ],
+      "drop_count_range": [1, 2]
+    },
+    {
+      "id": "memory_echo",
+      "name": "Memory Echo",
+      "description": "A contradictory record that attacks anything trying to choose one truth.",
+      "types": ["crystal", "void"],
+      "xp_reward": 160,
+      "stats": {
+        "strength": 28,
+        "attack": 40,
+        "magic_ability": 104,
+        "defense": 24,
+        "speed": 74,
+        "max_hp": 240
+      },
+      "color": [178, 142, 230],
+      "attack_ids": [
+        "diamond_shard",
+        "mirror_peel",
+        "abyssal_anchor"
+      ],
+      "drop_pool": [
+        "spark_tonic",
+        "lucky_potato",
+        "mystery_gravy"
+      ],
+      "drop_count_range": [1, 2]
     }
   ]
 }

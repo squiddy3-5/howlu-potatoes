@@ -2,14 +2,15 @@
   "npcs": [
     {
       "id": "merchant",
-      "name": "Merchant",
+      "name": "Merchant Yumi",
       "map_id": "starting_town",
-      "grid_x": 14,
+      "grid_x": 5,
       "grid_y": 18,
       "color": [255, 200, 50],
       "dialogue": [
         "Welcome, big stink!",
-        "I have wares if you dont have gold. haha"
+        "I have wares if you dont have gold. haha",
+        "Prices are supposed to shift with alignment, but today I am testing suspiciously cheap mercy."
       ],
       "shop": [
         {"item_id": "small_potion", "price": 1},
@@ -17,7 +18,7 @@
         {"item_id": "spark_tonic", "price": 1},
         {"item_id": "iron_bark", "price": 1},
         {"item_id": "fire_potion", "price": 1},
-        {"item_id":"king_crab_helmet", "price": 1},
+        {"item_id": "king_crab_helmet", "price": 1},
         {"item_id": "iron_armor", "price": 1}
       ]
     },
@@ -26,11 +27,571 @@
       "name": "Villager",
       "map_id": "starting_town",
       "grid_x": 18,
-      "grid_y": 12,
+      "grid_y": 14,
       "color": [150, 200, 150],
       "dialogue": [
-        "Beware the forest...",
-        "Strange creatures lurk there."
+        {
+          "text": "Hello, what is your name?",
+          "choices": [
+            {
+              "text": "Im not telling",
+              "faction": {"archivists": -1},
+              "next": 1
+            },
+            {
+              "text": "Howlu",
+              "faction": {"archivists": 1},
+              "next": 2
+            }
+          ]
+        },
+        {
+          "text": "Mysterious. I will call you Potato Stranger.",
+          "next": 3
+        },
+        {
+          "text": "Howlu? Then the potatoes chose a very brave name.",
+          "next": 3
+        },
+        {
+          "text": "Do you want me to send you to the forest path?",
+          "choices": [
+            {
+              "text": "Yes, send me",
+              "message": "The villager points you toward the trees.",
+              "teleport": {
+                "map_id": "forest_path",
+                "entry_id": "from_town"
+              }
+            },
+            {
+              "text": "No, thanks",
+              "end": true
+            }
+          ]
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "mayor_tuberlin",
+      "name": "Mayor Tuberlin",
+      "map_id": "starting_town",
+      "grid_x": 17,
+      "grid_y": 7,
+      "color": [220, 190, 120],
+      "dialogue": [
+        "Potato Haven is peaceful only because everyone is too scared to say what they want.",
+        {
+          "text": "If you speak for a faction, speak softly. If you speak for yourself, speak clearly.",
+          "choices": [
+            {
+              "text": "I will keep the peace",
+              "quest": {
+                "id": "keep_potato_haven_peace",
+                "name": "Keep Potato Haven's Peace",
+                "description": "Mayor Tuberlin wants Potato Haven to survive the growing faction pressure without becoming a battlefield. Stay balanced, listen to each side, and watch for signs that the town is changing around your choices.",
+                "faction": {}
+              },
+              "next": 2
+            },
+            {
+              "text": "Peace is not enough",
+              "faction": {"armada": 1, "spud_wardens": -1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Then you may become the rarest thing here: a person all three factions hesitate to erase.",
+          "end": true
+        },
+        {
+          "text": "That is how every war starts sounding reasonable.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "mira_sprout",
+      "name": "Mira Sprout",
+      "map_id": "starting_town",
+      "grid_x": 7,
+      "grid_y": 2,
+      "color": [142, 205, 112],
+      "requires": {"any_accepted_quests": ["keep_potato_haven_peace"]},
+      "dialogue": [
+        "My field grew the same potato twice yesterday. Same shape. Different memory.",
+        {
+          "text": "The Spud Wardens call it a wound in the Healing Map. Will you help restore damaged land?",
+          "choices": [
+            {
+              "text": "Start the Healing Map",
+              "quest": {
+                "id": "healing_map_begin",
+                "name": "The Healing Map",
+                "description": "Mira Sprout believes the world can be healed by restoring fractured zones, purifying corrupted hubs, and stabilizing major regions before the Armada restructures them.",
+                "faction": {"spud_wardens": 3, "armada": -1}
+              },
+              "next": 2
+            },
+            {
+              "text": "Change may be irreversible",
+              "faction": {"archivists": 1, "spud_wardens": 1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Then follow living potato magic. It heals by listening first.",
+          "end": true
+        },
+        {
+          "text": "Maybe restoration means learning what the new world is trying to become.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "dock_engineer_brine",
+      "name": "Dock Engineer Brine",
+      "map_id": "starting_town",
+      "grid_x": 31,
+      "grid_y": 2,
+      "color": [112, 168, 230],
+      "requires": {"min_enemy_defeats": 1},
+      "dialogue": [
+        "A bridge that chooses its own destination is not magical. It is a liability.",
+        {
+          "text": "Boat Mom's Structure Protocol can secure unstable regions before they swallow towns like this one.",
+          "choices": [
+            {
+              "text": "Begin the Structure Protocol",
+              "quest": {
+                "id": "structure_protocol_begin",
+                "name": "The Structure Protocol",
+                "description": "Dock Engineer Brine wants you to secure unstable regions, deploy control nodes, suppress anomalies, and prove whether full control or hybrid order can keep the world alive.",
+                "faction": {"armada": 3, "spud_wardens": -1}
+              },
+              "next": 2
+            },
+            {
+              "text": "Systems should not override people",
+              "faction": {"spud_wardens": 2, "armada": -1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Good. Mercy without structure is just panic with softer words.",
+          "end": true
+        },
+        {
+          "text": "People are exactly what systems are built to protect. Usually.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "archivist_luma",
+      "name": "Archivist Luma",
+      "map_id": "starting_town",
+      "grid_x": 32,
+      "grid_y": 14,
+      "color": [206, 176, 255],
+      "requires": {"min_observed_enemies": 1},
+      "dialogue": [
+        "Hello again. Or first. I have notes supporting both.",
+        {
+          "text": "The Unwritten Truth begins with memory fragments. Will you preserve contradiction instead of solving it?",
+          "choices": [
+            {
+              "text": "Begin the Unwritten Truth",
+              "quest": {
+                "id": "unwritten_truth_begin",
+                "name": "The Unwritten Truth",
+                "description": "Archivist Luma asks you to collect memory fragments, observe faction conflicts, record paradox events, and decide whether many truths can survive together.",
+                "faction": {"archivists": 3}
+              },
+              "next": 2
+            },
+            {
+              "text": "One stable truth may be kinder",
+              "faction": {"spud_wardens": 1, "archivists": -1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Excellent. If reality repeats itself, take notes before it corrects you.",
+          "end": true
+        },
+        {
+          "text": "Kindness often edits the footnotes first.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "captain_saltfork",
+      "name": "Captain Saltfork",
+      "map_id": "starting_town",
+      "grid_x": 36,
+      "grid_y": 10,
+      "color": [120, 200, 220],
+      "requires": {"min_enemy_defeats": 2},
+      "dialogue": [
+        "The ocean fractured after the Starch Engine Incident. Some waves arrive before they leave.",
+        {
+          "text": "If you find the shore paths, watch the water. It remembers Boat Mom before the Armada did.",
+          "choices": [
+            {
+              "text": "Map the ocean fractures",
+              "quest": {
+                "id": "map_ocean_fractures",
+                "name": "Map the Ocean Fractures",
+                "description": "Captain Saltfork knows the sea routes broke when the Mopo fell into the world. Find shoreline anomalies and learn what the waves remember about Boat Mom.",
+                "faction": {"archivists": 1, "spud_wardens": 1}
+              },
+              "next": 2
+            },
+            {
+              "text": "The sea needs command routes",
+              "faction": {"armada": 2},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Good. A map is not control if you let the water disagree with you.",
+          "end": true
+        },
+        {
+          "text": "Spoken like a dock that has never met a storm.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "kid_spud",
+      "name": "Kid Spud",
+      "map_id": "starting_town",
+      "grid_x": 16,
+      "grid_y": 16,
+      "color": [255, 230, 120],
+      "requires": {"min_total_faction": 5},
+      "dialogue": [
+        "I saw you tomorrow! You were taller. Or maybe the moon was closer.",
+        {
+          "text": "If all three groups like you the same amount, the Root Keeper stops naming your path.",
+          "choices": [
+            {
+              "text": "Stay hard to classify",
+              "quest": {
+                "id": "true_neutral_seed",
+                "name": "A Path Without a Name",
+                "description": "Kid Spud hints at a secret neutral path. Keep faction influence balanced, make contradictory decisions, and see whether the Root Keeper refuses to classify you.",
+                "faction": {"spud_wardens": 1, "armada": 1, "archivists": 1}
+              },
+              "next": 2
+            },
+            {
+              "text": "I want a clear side",
+              "faction": {"armada": 1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Neat. I will remember this before you do.",
+          "end": true
+        },
+        {
+          "text": "Clear sides are easier to draw and easier to cut out.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "guard_unit_07",
+      "name": "Guard Unit 07",
+      "map_id": "starting_town",
+      "grid_x": 37,
+      "grid_y": 10,
+      "color": [120, 150, 190],
+      "requires": {"min_faction": {"armada": 2}},
+      "dialogue": [
+        "Unregistered variable detected. Please become predictable.",
+        {
+          "text": "Compliance reduces accidents. Resistance creates paperwork and sometimes craters.",
+          "choices": [
+            {
+              "text": "Register with the guard",
+              "faction": {"armada": 2},
+              "next": 2
+            },
+            {
+              "text": "Refuse registration",
+              "faction": {"spud_wardens": 1, "armada": -1},
+              "next": 3
+            },
+            {
+              "text": "Ask what it remembers",
+              "faction": {"archivists": 1},
+              "next": 4
+            }
+          ]
+        },
+        {
+          "text": "Predictability accepted. Uncertainty reduced by a number I am not allowed to show you.",
+          "end": true
+        },
+        {
+          "text": "Refusal recorded. Please enjoy your temporary freedom responsibly.",
+          "end": true
+        },
+        {
+          "text": "Memory file unavailable. Memory file unavailable. Memory file singing quietly.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "old_farmer_crumb",
+      "name": "Old Farmer Crumb",
+      "map_id": "starting_town",
+      "grid_x": 30,
+      "grid_y": 18,
+      "color": [160, 120, 80],
+      "requires": {"min_faction": {"archivists": 2}},
+      "dialogue": [
+        "I remember the Golden Mash Age. I also remember it never happened. Both memories have dirt under their nails.",
+        {
+          "text": "Do not let anyone tell you contradiction is useless. Sometimes it is the only proof the world survived.",
+          "choices": [
+            {
+              "text": "Record the old histories",
+              "quest": {
+                "id": "record_golden_mash_memories",
+                "name": "Record Golden Mash Memories",
+                "description": "Old Farmer Crumb carries conflicting memories of the Golden Mash Age. Preserve his contradictions before the Root Archive or the Armada turns them into one clean story.",
+                "faction": {"archivists": 2}
+              },
+              "next": 2
+            },
+            {
+              "text": "Help the living soil first",
+              "faction": {"spud_wardens": 2},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Good. Write this down: the moon used to smell like rain and fries.",
+          "end": true
+        },
+        {
+          "text": "Also good. Memories do not grow dinner unless someone tends the dirt.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "silent_traveler",
+      "name": "Silent Traveler",
+      "map_id": "starting_town",
+      "grid_x": 19,
+      "grid_y": 22,
+      "color": [180, 180, 180],
+      "requires": {"min_faints": 2, "min_total_faction": 4},
+      "dialogue": [
+        {
+          "text": "...",
+          "choices": [
+            {
+              "text": "Wait quietly",
+              "faction": {"archivists": 1},
+              "next": 1
+            },
+            {
+              "text": "Offer a potato sprout",
+              "faction": {"spud_wardens": 1},
+              "next": 2
+            },
+            {
+              "text": "Ask for identification",
+              "faction": {"armada": 1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "The traveler blinks once. It may have been a thank you.",
+          "end": true
+        },
+        {
+          "text": "The traveler touches the sprout like it recognizes the future.",
+          "end": true
+        },
+        {
+          "text": "The traveler shows you an empty hand. Somehow it feels official.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "warden_mender",
+      "name": "Spud Warden Mender",
+      "map_id": "mopo_meadow",
+      "grid_x": 13,
+      "grid_y": 6,
+      "color": [142, 205, 112],
+      "dialogue": [
+        "The Mopo grass remembers the Golden Mash Age. It is weak, but still alive.",
+        {
+          "text": "Will you help us reconnect the meadow paths instead of forcing them into order?",
+          "choices": [
+            {
+              "text": "I will help restore them",
+              "quest": {
+                "id": "restore_mopo_paths",
+                "name": "Restore the Mopo Paths",
+                "description": "Reconnect the unstable paths through Mopo Meadow and prove that living potato magic can be stabilized without being chained by recipe logic.",
+                "faction": {"spud_wardens": 3, "armada": -1}
+              },
+              "next": 2
+            },
+            {
+              "text": "Control sounds safer",
+              "faction": {"armada": 2, "spud_wardens": -2},
+              "next": 3
+            },
+            {
+              "text": "I only want to record what happens",
+              "faction": {"archivists": 2},
+              "next": 4
+            }
+          ]
+        },
+        {
+          "text": "Then listen for living potato magic. It bends, but it should not be chained.",
+          "end": true
+        },
+        {
+          "text": "That is Boat Mom's answer. It may save a road while killing the meadow.",
+          "end": true
+        },
+        {
+          "text": "A record can help, if you remember that roots are alive before they are evidence.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "armada_quartermaster",
+      "name": "Armada Quartermaster",
+      "map_id": "starch_engine_front",
+      "grid_x": 15,
+      "grid_y": 10,
+      "color": [112, 168, 230],
+      "dialogue": [
+        "Unregulated paths collapse. Unregulated people panic. Boat Mom understands this.",
+        {
+          "text": "Will you carry an Armada routing mark and help us impose safe structure?",
+          "choices": [
+            {
+              "text": "Accept the routing mark",
+              "quest": {
+                "id": "carry_armada_mark",
+                "name": "Carry the Armada Routing Mark",
+                "description": "Carry an Armada routing mark through unstable territory and test whether structure can protect the world without turning every path into an order.",
+                "faction": {"armada": 3, "spud_wardens": -1}
+              },
+              "next": 2
+            },
+            {
+              "text": "I will not help control the world",
+              "faction": {"spud_wardens": 2, "armada": -2},
+              "next": 3
+            },
+            {
+              "text": "I need proof before choosing",
+              "faction": {"archivists": 2},
+              "next": 4
+            }
+          ]
+        },
+        {
+          "text": "Good. Structure is mercy when the world is splitting.",
+          "end": true
+        },
+        {
+          "text": "Then enjoy uncertainty. It eats roads first, then names.",
+          "end": true
+        },
+        {
+          "text": "Proof is a luxury, but perhaps your caution has tactical value.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "archivist_scribe",
+      "name": "Archivist Scribe",
+      "map_id": "archive_vault",
+      "grid_x": 15,
+      "grid_y": 14,
+      "color": [206, 176, 255],
+      "dialogue": [
+        "Every version of the Starch Engine Incident is true somewhere. We preserve the contradictions.",
+        {
+          "text": "What should be done with conflicting memories?",
+          "choices": [
+            {
+              "text": "Preserve every version",
+              "quest": {
+                "id": "catalog_conflicting_truths",
+                "name": "Catalog Conflicting Truths",
+                "description": "Preserve conflicting memories inside the Archivist Vault and learn why contradiction might be evidence rather than corruption.",
+                "faction": {"archivists": 3}
+              },
+              "next": 2
+            },
+            {
+              "text": "Heal the one world we still have",
+              "faction": {"spud_wardens": 2, "archivists": -1},
+              "next": 3
+            },
+            {
+              "text": "Choose the version that can be controlled",
+              "faction": {"armada": 2, "archivists": -1},
+              "next": 4
+            }
+          ]
+        },
+        {
+          "text": "Then you understand us. Contradiction is not always corruption.",
+          "end": true
+        },
+        {
+          "text": "A kind answer. Dangerous, but kind.",
+          "end": true
+        },
+        {
+          "text": "Control creates clean records. It also deletes the messy ones.",
+          "end": true
+        }
       ],
       "shop": []
     },
@@ -44,9 +605,69 @@
       "dialogue": [
         "You have returned to Root Home.",
         "I remember every time you fall.",
-        "The Mopo does not forget.",
-        "Who are you? I am the Root Keeper. I am the keeper of the Root Home.",
-        "Urghhh... not again... the memories..."
+        "The Mopo does not forget. Neither, now, do the factions.",
+        {
+          "text": "Where should the roots carry you?",
+          "choices": [
+            {
+              "text": "Starting Town",
+              "message": "Roots fold around your feet.",
+              "teleport": {
+                "map_id": "starting_town",
+                "entry_id": "from_root_home"
+              }
+            },
+            {
+              "text": "Stay here",
+              "next": 4
+            }
+          ]
+        },
+        {
+          "text": "Then rest for a moment. The Root Home is quiet.",
+          "end": true
+        }
+      ],
+      "shop": []
+    },
+    {
+      "id": "root_keeper_echo",
+      "name": "Root Keeper Echo",
+      "map_id": "archive_vault",
+      "grid_x": 15,
+      "grid_y": 12,
+      "color": [120, 255, 200],
+      "requires": {"min_faction": {"archivists": 4}, "min_observed_enemies": 2},
+      "dialogue": [
+        "I am not the Root Keeper. I am the version that remembers what he forgets.",
+        {
+          "text": "The Root Archive wants one consistent truth. That would make the world easier to explain and smaller to live in.",
+          "choices": [
+            {
+              "text": "Protect alternate outcomes",
+              "quest": {
+                "id": "protect_alternate_outcomes",
+                "name": "Protect Alternate Outcomes",
+                "description": "The Root Keeper Echo warns that the final Root Archive could merge all memories into one interpretation, erasing alternate outcomes and player freedom. Preserve contradiction until the final choice appears.",
+                "faction": {"archivists": 2, "spud_wardens": 1}
+              },
+              "next": 2
+            },
+            {
+              "text": "A single truth may save reality",
+              "faction": {"armada": 2, "archivists": -1},
+              "next": 3
+            }
+          ]
+        },
+        {
+          "text": "Then when the archive asks you to become simple, remember how hard you fought to stay whole.",
+          "end": true
+        },
+        {
+          "text": "A single truth is sharp. Hold it carefully, or it will cut away more than lies.",
+          "end": true
+        }
       ],
       "shop": []
     }

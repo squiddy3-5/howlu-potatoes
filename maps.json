@@ -1,166 +1,324 @@
 {
-    "maps": [
-      {
-        "id": "starting_town",
-        "name": "Starting Town",
-        "entries": [
-          {
-            "id": "town_center",
-            "grid_x": 15,
-            "grid_y": 10
-          },
-          {
-            "id": "from_forest",
-            "grid_x": 28,
-            "grid_y": 10
-          },
-          {
-            "id": "from_root_home",
-            "grid_x": 15,
-            "grid_y": 18
-          }
-        ],
-        "exits": [
-          {
-            "grid_x": 29,
-            "grid_y": 10,
-            "target_map_id": "forest_path",
-            "target_entry_id": "from_town",
-            "label": "You head out toward the forest."
-          },
-          {
-            "grid_x": 15,
-            "grid_y": 19,
-            "target_map_id": "root_home",
-            "target_entry_id": "from_faint",
-            "label": "A strange pull guides you elsewhere..."
-          }
-        ],
-        "layout": [
-          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B..................................",
-          "B..................................",
-          "B.................................B",
-          "B.................................B",
-          "B.................................B",
-          "B.........NNNNNNNN................B",
-          "B.........N......N................B",
-          "B.........N..NN..N................B",
-          "B.........N.NNNN.N................B",
-          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-        ],
-        "legend": {
-          ".": "grass",
-          "B": "building",
-          "P": "path",
-          "W": "water",
-          "T": "tree"
+  "maps": [
+    {
+      "id": "starting_town",
+      "name": "Starting Town",
+      "entries": [
+        {"id": "town_center", "grid_x": 19, "grid_y": 11},
+        {"id": "from_forest", "grid_x": 38, "grid_y": 10},
+        {"id": "from_root_home", "grid_x": 20, "grid_y": 22}
+      ],
+      "exits": [
+        {
+          "grid_x": 39,
+          "grid_y": 10,
+          "target_map_id": "forest_path",
+          "target_entry_id": "from_town",
+          "label": "You head out toward the forest."
+        },
+        {
+          "grid_x": 20,
+          "grid_y": 23,
+          "target_map_id": "root_home",
+          "target_entry_id": "from_faint",
+          "label": "A strange pull guides you elsewhere..."
+        }
+      ],
+      "connections": {
+        "right": {
+          "target_map_id": "forest_path",
+          "target_entry_id": "from_town",
+          "label": "You push past the edge of town toward the forest."
+        },
+        "down": {
+          "target_map_id": "root_home",
+          "target_entry_id": "from_faint",
+          "label": "A strange pull guides you elsewhere..."
         }
       },
-      {
-        "id": "forest_path",
-        "name": "Forest Path",
-        "entries": [
-          {
-            "id": "from_town",
-            "grid_x": 1,
-            "grid_y": 10
-          }
-        ],
-        "exits": [
-          {
-            "grid_x": 0,
-            "grid_y": 10,
-            "target_map_id": "starting_town",
-            "target_entry_id": "from_forest",
-            "label": "You return to town."
-          }
-        ],
-        "layout": [
-          "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          ".............................T",
-          ".............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "T............................T",
-          "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
-        ],
-        "legend": {
-          ".": "grass",
-          "T": "tree"
-        }
-      },
-      {
-        "id": "root_home",
-        "name": "Root Home",
-        "safe_zone": true,
-        "entries": [
-          {
-            "id": "from_faint",
-            "grid_x": 15,
-            "grid_y": 18
-          }
-        ],
-        "exits": [
-          {
-            "grid_x": 15,
-            "grid_y": 19,
-            "target_map_id": "starting_town",
-            "target_entry_id": "from_root_home",
-            "label": "You return to the world."
-          }
-        ],
-        "layout": [
-          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-          "B............TTTT............B",
-          "B...........T....T...........B",
-          "B..........T......T..........B",
-          "B.........T........T.........B",
-          "B........T..........T........B",
-          "B.......T............T.......B",
-          "B......T..............T......B",
-          "B.....T................T.....B",
-          "B....T..................T....B",
-          "B...T..........E........T....B",
-          "B....T..................T....B",
-          "B.....T................T.....B",
-          "B......T..............T......B",
-          "B.......T............T.......B",
-          "B........T..........T........B",
-          "B.........T........T.........B",
-          "B..........T......T..........B",
-          "B...........T..R..T..........B",
-          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-        ],
-        "legend": {
-          ".": "floor",
-          "B": "boundary",
-          "T": "root_tree",
-          "R": "root_core",
-          "E": "exit"
-        }
+      "layout": [
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "B....BBBBBB......PPPP......BBBBBB......B",
+        "B....BNNNNB......PPPP......BNNNNB......B",
+        "B....BNNNNB......PPPP......BNNNNB......B",
+        "B....BB.BBB......PPPP......BBB.BB......B",
+        "B......................................B",
+        "B..BBBBBB....BBBBBBBB....BBBBBB........B",
+        "B..BNNNNB....BNNNNNNB....BNNNNB........B",
+        "B..BNNNNB....BNNNNNNB....BNNNNB........B",
+        "B..BB.BBB....BBBB.BBB....BBB.BB........B",
+        "B................PPPP..................E",
+        "B................PPPP..................B",
+        "B..BBBBBB........PPPP........BBBBBB....B",
+        "B..BNNNNB....................BNNNNB....B",
+        "B..BNNNNB....NNNNNNNNNN......BNNNNB....B",
+        "B..BB.BBB....N........N......BBB.BB....B",
+        "B............N..NNNN..N................B",
+        "B..BBBBBB....N.NNNNNN.N....BBBBBB......B",
+        "B..BNNNNB....N........N....BNNNNB......B",
+        "B..BNNNNB....NNNNNNNNNN....BNNNNB......B",
+        "B..BB.BBB..................BBB.BB......B",
+        "B......................................B",
+        "B...................P..................B",
+        "BBBBBBBBBBBBBBBBBBBBEBBBBBBBBBBBBBBBBBBB"
+      ],
+      "legend": {
+        ".": "grass",
+        "P": "main path",
+        "B": "building",
+        "N": "safe zone",
+        "E": "exit"
       }
-    ]
-  }
+    },
+    {
+      "id": "forest_path",
+      "name": "Forest Path",
+      "entries": [
+        {"id": "from_town", "grid_x": 1, "grid_y": 10},
+        {"id": "from_mopo_meadow", "grid_x": 28, "grid_y": 10}
+      ],
+      "exits": [
+        {
+          "grid_x": 0,
+          "grid_y": 10,
+          "target_map_id": "starting_town",
+          "target_entry_id": "from_forest",
+          "label": "You return to town."
+        }
+      ],
+      "connections": {
+        "left": {
+          "target_map_id": "starting_town",
+          "target_entry_id": "from_forest",
+          "label": "You step back into town."
+        },
+        "right": {
+          "target_map_id": "mopo_meadow",
+          "target_entry_id": "from_forest",
+          "label": "The forest opens into Mopo-lit grass."
+        }
+      },
+      "layout": [
+        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "E.............................",
+        "..............................",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      ],
+      "legend": {
+        ".": "grass",
+        "T": "tree",
+        "E": "exit"
+      }
+    },
+    {
+      "id": "mopo_meadow",
+      "name": "Mopo Meadow",
+      "enemy_ids": ["mopo_fragment", "cooked_mind", "steam_mimic"],
+      "entries": [
+        {"id": "from_forest", "grid_x": 1, "grid_y": 10},
+        {"id": "from_engine_front", "grid_x": 28, "grid_y": 10},
+        {"id": "from_archive", "grid_x": 15, "grid_y": 1}
+      ],
+      "connections": {
+        "left": {
+          "target_map_id": "forest_path",
+          "target_entry_id": "from_mopo_meadow",
+          "label": "You return to the forest path."
+        },
+        "right": {
+          "target_map_id": "starch_engine_front",
+          "target_entry_id": "from_meadow",
+          "label": "The air tightens into recipe logic."
+        },
+        "up": {
+          "target_map_id": "archive_vault",
+          "target_entry_id": "from_meadow",
+          "label": "A remembered stair appears above the grass."
+        }
+      },
+      "layout": [
+        "TTTTTTTTTTTTTTT.TTTTTTTTTTTTTT",
+        "T............................T",
+        "T............................T",
+        "T...........NNNNNN...........T",
+        "T...........N....N...........T",
+        "T...........N....N...........T",
+        "T...........NNNNNN...........T",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "..............................",
+        "..............................",
+        "T............................T",
+        "T............................T",
+        "T............................T",
+        "T...........T....T...........T",
+        "T..........T......T..........T",
+        "T............................T",
+        "T............................T",
+        "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      ],
+      "legend": {
+        ".": "mopo grass",
+        "T": "tree",
+        "N": "stabilized memory"
+      }
+    },
+    {
+      "id": "starch_engine_front",
+      "name": "Starch Engine Front",
+      "enemy_ids": ["sear_unit", "broth_guardian", "steam_mimic", "paella_monster"],
+      "entries": [
+        {"id": "from_meadow", "grid_x": 1, "grid_y": 10}
+      ],
+      "connections": {
+        "left": {
+          "target_map_id": "mopo_meadow",
+          "target_entry_id": "from_engine_front",
+          "label": "You slip away from the Armada front."
+        }
+      },
+      "layout": [
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "BPPPPPPPPPPPPPPPPPPPPPPPPPPPPB",
+        "BP..........................PB",
+        "BP..BBBB............BBBB....PB",
+        "BP..B..................B....PB",
+        "BP..B....WWWWWWWW....B......PB",
+        "BP.......W......W...........PB",
+        "BP.......W......W...........PB",
+        "BP.......WWWWWWWW...........PB",
+        "BP..........................PB",
+        "............................PB",
+        "............................PB",
+        "BP..........................PB",
+        "BP....BBBB..........BBBB....PB",
+        "BP..........................PB",
+        "BP....PPPPPPPPPPPPPPPPPP....PB",
+        "BP..........................PB",
+        "BP..........................PB",
+        "BPPPPPPPPPPPPPPPPPPPPPPPPPPPPB",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      ],
+      "legend": {
+        ".": "scorched ground",
+        "P": "engine path",
+        "B": "engine wall",
+        "W": "boiling channel"
+      }
+    },
+    {
+      "id": "archive_vault",
+      "name": "Archivist Vault",
+      "enemy_ids": ["memory_echo", "steam_mimic", "cooked_mind"],
+      "entries": [
+        {"id": "from_meadow", "grid_x": 15, "grid_y": 18}
+      ],
+      "connections": {
+        "down": {
+          "target_map_id": "mopo_meadow",
+          "target_entry_id": "from_archive",
+          "label": "The recorded path folds back into meadow grass."
+        }
+      },
+      "layout": [
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "B............................B",
+        "B....NNNNNNNN....NNNNNNNN....B",
+        "B....N..................N....B",
+        "B....N....BBBBBBBB....N......B",
+        "B.........B......B...........B",
+        "B.........B......B...........B",
+        "B....N....BBBBBBBB....N......B",
+        "B....N..................N....B",
+        "B....NNNNNNNN....NNNNNNNN....B",
+        "B............................B",
+        "B............TTTT............B",
+        "B...........T....T...........B",
+        "B............................B",
+        "B....NNNN............NNNN....B",
+        "B............................B",
+        "B............................B",
+        "B............................B",
+        "B..............E.............B",
+        "BBBBBBBBBBBBBBB.BBBBBBBBBBBBBB"
+      ],
+      "legend": {
+        ".": "archive floor",
+        "B": "memory wall",
+        "N": "quiet stacks",
+        "T": "root archive",
+        "E": "exit marker"
+      }
+    },
+    {
+      "id": "root_home",
+      "name": "Root Home",
+      "safe_zone": true,
+      "entries": [
+        {"id": "from_faint", "grid_x": 15, "grid_y": 18}
+      ],
+      "exits": [
+        {
+          "grid_x": 15,
+          "grid_y": 19,
+          "target_map_id": "starting_town",
+          "target_entry_id": "from_root_home",
+          "label": "You return to the world."
+        }
+      ],
+      "connections": {
+        "down": {
+          "target_map_id": "starting_town",
+          "target_entry_id": "from_root_home",
+          "label": "You return to the world."
+        }
+      },
+      "layout": [
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "B............TTTT............B",
+        "B...........T....T...........B",
+        "B..........T......T..........B",
+        "B.........T........T.........B",
+        "B........T..........T........B",
+        "B.......T............T.......B",
+        "B......T..............T......B",
+        "B.....T................T.....B",
+        "B....T..................T....B",
+        "B...T..........E........T....B",
+        "B....T..................T....B",
+        "B.....T................T.....B",
+        "B......T..............T......B",
+        "B.......T............T.......B",
+        "B........T..........T........B",
+        "B.........T........T.........B",
+        "B..........T......T..........B",
+        "B...........T..R..T..........B",
+        "BBBBBBBBBBBBBBBEBBBBBBBBBBBBBB"
+      ],
+      "legend": {
+        ".": "floor",
+        "B": "boundary",
+        "T": "root tree",
+        "R": "root core",
+        "E": "exit"
+      }
+    }
+  ]
+}

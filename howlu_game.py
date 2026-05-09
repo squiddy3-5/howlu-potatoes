@@ -36,10 +36,11 @@ DEFAULT_SCREEN_HEIGHT = 768
 FPS = 60
 TILE_SIZE = 32
 FULLSCREEN_MODE = True
+WINDOW_TITLE = "Howlu Potatoes"
 
 
 def _fit_window_to_display(width: int, height: int) -> tuple[int, int]:
-    """Choose fullscreen size or scale window to fit monitor."""
+    """Choose fullscreen size or scale a titled window to fit the monitor."""
     display_info = pygame.display.Info()
     if FULLSCREEN_MODE:
         return display_info.current_w, display_info.current_h
@@ -81,6 +82,7 @@ TERRAIN_SYMBOLS = {
     'T': TERRAIN_TREE,
     'N': TERRAIN_NOSPAWN,
     'E': TERRAIN_EXIT,
+    'R': TERRAIN_NOSPAWN,
 }
 
 # Colors
@@ -94,11 +96,15 @@ PURPLE = (128, 0, 128)
 GRAY = (128, 128, 128)
 DARK_RED = (139, 0, 0)
 
-#change this later bc for testing
-ATTACK_CHOICE_TIME_MS = 1000000
+ATTACK_CHOICE_TIME_MS = 15000
 GAME_VERSION = "0.14"
 ATTACK_PAGE_SIZE = 5
 SAVE_FILE_NAME = "savegame.json"
+FACTIONS = {
+    "spud_wardens": {"name": "Spud Wardens", "color": (142, 205, 112)},
+    "armada": {"name": "Armada", "color": (112, 168, 230)},
+    "archivists": {"name": "Archivists", "color": (206, 176, 255)},
+}
 BESTIARY_RANKS = [
     (1, "Potato Scout", 0),
     (2, "Spud Seeker", 4),
@@ -734,7 +740,12 @@ class Game:
     def __init__(self):
         display_flags = pygame.FULLSCREEN if FULLSCREEN_MODE else 0
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), display_flags)
-        pygame.display.set_caption("Potatoes for Howlu - a Game")
+        pygame.display.set_caption(WINDOW_TITLE)
+        if os.path.exists("characters/howlu.png"):
+            try:
+                pygame.display.set_icon(pygame.image.load("characters/howlu.png"))
+            except pygame.error:
+                pass
         self.clock = pygame.time.Clock()
         self.running = True
         self.font_large = pygame.font.Font(None, 36)
@@ -787,6 +798,8 @@ class Game:
         self.show_bestiary = False
         self.bestiary_selection = 0
         self.bestiary_page = 0
+        self.show_quest_log = False
+        self.quest_log_selection = 0
         self.attack_animation_cache: Dict[str, tuple[List[pygame.Surface], List[int]]] = {}
         self.active_attack_cutscene: Optional[Dict] = None
         self.active_mines: List[Dict] = []
@@ -809,6 +822,10 @@ class Game:
         self.next_forced_boss_id: Optional[str] = None
         self.active_sigils: List[Dict] = []
         self.selected_battle_target = 0
+        self.faint_count = 0
+        self.move_memory_counts: Dict[str, int] = {}
+        self.current_battle_move_memory: Dict[str, int] = {}
+        self.observed_enemy_ids: set[str] = set()
         
         # Movement variables
         self.player_velocity = [0, 0]  # [vx, vy]
@@ -844,10 +861,13 @@ class Game:
         self.show_save_confirm = False
         self.save_confirm_choice = 1
         self.gold = 100
-        self.faction_progress: Dict[str, Dict[str, int]] = {}
+        self.faction_progress: Dict[str, int] = {faction_id: 0 for faction_id in FACTIONS}
+        self.accepted_quests: set[str] = set()
+        self.npc_action_history: set[str] = set()
         self.npcs = []
         self.active_npc = None
         self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
         self.show_shop = False
         self.shop_selection = 0
         self._load_npcs()
@@ -967,9 +987,46 @@ class Game:
 
     def _npcs_on_current_map(self):
         if not self.map_data:
-            return self.npcs
+            return [npc for npc in self.npcs if self._npc_requirements_met(npc)]
         current_map_id = self.map_data[self.current_map_index].get("id", "")
-        return [npc for npc in self.npcs if npc.get("map_id") == current_map_id]
+        return [
+            npc for npc in self.npcs
+            if npc.get("map_id") == current_map_id and self._npc_requirements_met(npc)
+        ]
+
+    def _npc_requirements_met(self, npc: Dict) -> bool:
+        requirements = npc.get("requires", {})
+        if not isinstance(requirements, dict):
+            return True
+
+        if self.faint_count < int(requirements.get("min_faints", 0)):
+            return False
+        if self.player and self.player.enemy_defeats < int(requirements.get("min_enemy_defeats", 0)):
+            return False
+        if len(self.observed_enemy_ids) < int(requirements.get("min_observed_enemies", 0)):
+            return False
+        if sum(abs(int(value)) for value in self.faction_progress.values()) < int(requirements.get("min_total_faction", 0)):
+            return False
+
+        min_faction = requirements.get("min_faction", {})
+        if isinstance(min_faction, dict):
+            for faction_id, amount in min_faction.items():
+                if int(self.faction_progress.get(faction_id, 0)) < int(amount):
+                    return False
+
+        accepted_any = requirements.get("any_accepted_quests", [])
+        if accepted_any and not any(str(quest_id) in self.accepted_quests for quest_id in accepted_any):
+            return False
+
+        accepted_all = requirements.get("all_accepted_quests", [])
+        if accepted_all and not all(str(quest_id) in self.accepted_quests for quest_id in accepted_all):
+            return False
+
+        required_alignment = requirements.get("alignment")
+        if required_alignment and self._dominant_faction_id() != str(required_alignment):
+            return False
+
+        return True
 
     def _current_map_info(self) -> Dict:
         if self.map_data and 0 <= self.current_map_index < len(self.map_data):
@@ -996,6 +1053,9 @@ class Game:
             return False
         return tile_type not in {TERRAIN_BUILDING, TERRAIN_WATER, TERRAIN_TREE}
 
+    def _tile_is_map_edge_landing(self, grid_x: int, grid_y: int) -> bool:
+        return self._tile_is_walkable(grid_x, grid_y) and self._tile_type_at(grid_x, grid_y) != TERRAIN_EXIT
+
     def _get_nearby_npc(self):
         for npc in self._npcs_on_current_map():
             dx = abs(self.player_grid_x - npc["grid_x"])
@@ -1005,15 +1065,341 @@ class Game:
         return None
 
     def _start_npc_interaction(self, npc: Dict):
+        if npc.get("id") == "root_keeper":
+            npc = dict(npc)
+            npc["dialogue"] = self._root_keeper_dialogue()
         self.active_npc = npc
         self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
         self.show_shop = False
         self.shop_selection = 0
+
+    def _root_keeper_dialogue(self) -> List[object]:
+        alignment = self._alignment_label()
+        faint_line = f"I remember {self.faint_count} fall{'s' if self.faint_count != 1 else ''}."
+        if self.faint_count == 0:
+            faint_line = "I remember every time you fall. None have happened in this thread yet."
+        if alignment == "True Neutral":
+            alignment_line = "You are becoming difficult to classify. The roots do not dislike this."
+        elif alignment == "Unaligned":
+            alignment_line = "No faction has named your path yet."
+        else:
+            alignment_line = f"The roots hear {alignment} in your choices."
+        return [
+            "You have returned to Root Home.",
+            faint_line,
+            alignment_line,
+            "The Mopo does not forget. Neither, now, do the factions.",
+            {
+                "text": "Where should the roots carry you?",
+                "choices": [
+                    {
+                        "text": "Starting Town",
+                        "message": "Roots fold around your feet.",
+                        "teleport": {
+                            "map_id": "starting_town",
+                            "entry_id": "from_root_home"
+                        }
+                    },
+                    {
+                        "text": "Stay here",
+                        "next": 5
+                    }
+                ]
+            },
+            {
+                "text": "Then rest for a moment. The Root Home is quiet, but not empty.",
+                "end": True
+            }
+        ]
+
+    def _shop_price(self, shop_entry: Dict, item_data: Dict) -> int:
+        base_price = max(0, int(shop_entry.get("price", 0)))
+        if self.active_npc and self.active_npc.get("id") == "merchant":
+            alignment = self._dominant_faction_id()
+            effect_type = str(item_data.get("effect_type", ""))
+            if alignment == "spud_wardens" and effect_type in {"heal", "ability_charges"}:
+                base_price = max(1, int(round(base_price * 0.85)))
+            elif alignment == "armada" and (effect_type.startswith("armor_") or effect_type.startswith("helmet_")):
+                base_price = max(1, int(round(base_price * 0.85)))
+            elif alignment == "archivists":
+                base_price = max(1, int(round(base_price * 0.95)))
+            elif alignment == "true_neutral":
+                base_price = max(1, int(round(base_price * 0.9)))
+        return base_price
+
+    def _close_npc_interaction(self):
+        self.active_npc = None
+        self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
+        self.show_shop = False
+        self.shop_selection = 0
+
+    def _current_npc_dialogue_entry(self):
+        if not self.active_npc:
+            return None
+        dialogue = self.active_npc.get("dialogue", [])
+        if not dialogue or not 0 <= self.npc_dialogue_index < len(dialogue):
+            return None
+        return dialogue[self.npc_dialogue_index]
+
+    def _npc_entry_text(self, entry) -> str:
+        if isinstance(entry, dict):
+            return str(entry.get("text", ""))
+        return str(entry)
+
+    def _npc_entry_choices(self, entry) -> List[Dict]:
+        if not isinstance(entry, dict):
+            return []
+        return [choice for choice in entry.get("choices", []) if isinstance(choice, dict)]
+
+    def _quest_catalog(self) -> Dict[str, Dict]:
+        catalog = {}
+        for npc in self.npcs:
+            for entry in npc.get("dialogue", []):
+                candidates = []
+                if isinstance(entry, dict):
+                    candidates.append(entry)
+                    candidates.extend(self._npc_entry_choices(entry))
+                for action in candidates:
+                    quest_data = action.get("quest") if isinstance(action, dict) else None
+                    if not isinstance(quest_data, dict):
+                        continue
+                    quest_id = str(quest_data.get("id", "")).strip()
+                    if not quest_id:
+                        continue
+                    catalog[quest_id] = {
+                        "id": quest_id,
+                        "name": str(quest_data.get("name", quest_id)),
+                        "description": str(quest_data.get("description", "No quest notes yet.")),
+                        "faction": quest_data.get("faction", {}),
+                        "giver": str(npc.get("name", "Unknown")),
+                    }
+        return catalog
+
+    def _npc_travel_to(self, map_id: str, entry_id: Optional[str] = None) -> bool:
+        target_index = self._map_index_by_id(map_id)
+        if target_index is None:
+            self._message(f"Unknown destination: {map_id}", 180)
+            return False
+        self._travel_to_map(target_index, entry_id)
+        return True
+
+    def _change_faction_progress(self, changes: Dict):
+        if not isinstance(changes, dict):
+            return
+        for faction_id, delta in changes.items():
+            if faction_id not in FACTIONS:
+                continue
+            try:
+                amount = int(delta)
+            except (TypeError, ValueError):
+                continue
+            self.faction_progress[faction_id] = max(-99, min(99, self.faction_progress.get(faction_id, 0) + amount))
+            faction_name = FACTIONS[faction_id]["name"]
+            sign = "+" if amount >= 0 else ""
+            self._message(f"{faction_name} {sign}{amount}", 150)
+
+    def _accept_quest(self, quest_data: Dict) -> bool:
+        if not isinstance(quest_data, dict):
+            return False
+        quest_id = str(quest_data.get("id", "")).strip()
+        if not quest_id:
+            return False
+        quest_name = str(quest_data.get("name", quest_id))
+        if quest_id in self.accepted_quests:
+            self._message(f"Quest already accepted: {quest_name}", 180)
+            return True
+        self.accepted_quests.add(quest_id)
+        self._message(f"Quest accepted: {quest_name}", 220)
+        self._change_faction_progress(quest_data.get("faction", {}))
+        return True
+
+    def _dominant_faction_id(self) -> Optional[str]:
+        if not self.faction_progress:
+            return None
+        values = [int(self.faction_progress.get(faction_id, 0)) for faction_id in FACTIONS]
+        if max(values) - min(values) <= 2 and sum(abs(value) for value in values) >= 3:
+            return "true_neutral"
+        best_id = max(FACTIONS, key=lambda faction_id: self.faction_progress.get(faction_id, 0))
+        if self.faction_progress.get(best_id, 0) <= 0:
+            return None
+        return best_id
+
+    def _alignment_label(self) -> str:
+        dominant_faction_id = self._dominant_faction_id()
+        if dominant_faction_id == "true_neutral":
+            return "True Neutral"
+        if dominant_faction_id:
+            return FACTIONS[dominant_faction_id]["name"]
+        return "Unaligned"
+
+    def _apply_npc_action(self, action: Dict, action_key: Optional[str] = None) -> bool:
+        one_time_key = action_key if action.get("faction") or action.get("quest") else None
+        already_resolved = bool(one_time_key and one_time_key in self.npc_action_history)
+
+        if action.get("message"):
+            self._message(str(action["message"]), 180)
+        if action.get("faction") and not already_resolved:
+            self._change_faction_progress(action["faction"])
+        if action.get("quest") and not already_resolved:
+            self._accept_quest(action["quest"])
+        if one_time_key:
+            if already_resolved:
+                self._message("You have already made that choice.", 150)
+            else:
+                self.npc_action_history.add(one_time_key)
+        teleport = action.get("teleport")
+        if isinstance(teleport, dict):
+            destination_name = str(teleport.get("map_id", ""))
+            if destination_name and self._npc_travel_to(destination_name, teleport.get("entry_id")):
+                self._close_npc_interaction()
+                return True
+        if action.get("shop"):
+            self.show_shop = True
+            self.npc_choice_index = 0
+            return True
+        if action.get("end"):
+            self._close_npc_interaction()
+            return True
+        return False
+
+    def _advance_npc_dialogue(self):
+        if not self.active_npc:
+            return
+        dialogue = self.active_npc.get("dialogue", [])
+        entry = self._current_npc_dialogue_entry()
+        if entry is None:
+            self._close_npc_interaction()
+            return
+
+        choices = self._npc_entry_choices(entry)
+        if choices:
+            choice_index = max(0, min(self.npc_choice_index, len(choices) - 1))
+            selected_choice = choices[choice_index]
+            npc_id = str(self.active_npc.get("id", self.active_npc.get("name", "npc")))
+            action_key = f"{npc_id}:dialogue:{self.npc_dialogue_index}:choice:{choice_index}"
+            if self._apply_npc_action(selected_choice, action_key):
+                return
+            if "next" in selected_choice:
+                self.npc_dialogue_index = max(0, min(int(selected_choice["next"]), len(dialogue) - 1))
+                self.npc_choice_index = 0
+                return
+            self._close_npc_interaction()
+            return
+
+        if isinstance(entry, dict):
+            npc_id = str(self.active_npc.get("id", self.active_npc.get("name", "npc")))
+            action_key = f"{npc_id}:dialogue:{self.npc_dialogue_index}:entry"
+            if self._apply_npc_action(entry, action_key):
+                return
+            if "next" in entry:
+                self.npc_dialogue_index = max(0, min(int(entry["next"]), len(dialogue) - 1))
+                self.npc_choice_index = 0
+                return
+
+        if self.npc_dialogue_index < len(dialogue) - 1:
+            self.npc_dialogue_index += 1
+            self.npc_choice_index = 0
+        elif self.active_npc.get("shop"):
+            self.show_shop = True
+        else:
+            self._close_npc_interaction()
     
+    def _set_player_grid_position(self, grid_x: int, grid_y: int):
+        self.player_grid_x = max(0, min(int(grid_x), self.map_width - 1))
+        self.player_grid_y = max(0, min(int(grid_y), self.map_height - 1))
+        self.player_target_x = self.player_grid_x
+        self.player_target_y = self.player_grid_y
+        self.player_move_start_x = self.player_grid_x
+        self.player_move_start_y = self.player_grid_y
+        self.player_move_progress = 0.0
+        self.player_moving = False
+        self.player.x, self.player.y = self._grid_to_pixel_position(
+            self.player_grid_x,
+            self.player_grid_y,
+            self.player.width,
+            self.player.height,
+        )
+
+    def _nearest_walkable_tile(self, preferred_x: int, preferred_y: int) -> Optional[tuple[int, int]]:
+        preferred_x = max(0, min(int(preferred_x), self.map_width - 1))
+        preferred_y = max(0, min(int(preferred_y), self.map_height - 1))
+        if self._tile_is_walkable(preferred_x, preferred_y):
+            return preferred_x, preferred_y
+
+        best_tile = None
+        best_distance = 999999
+        for y in range(self.map_height):
+            for x in range(self.map_width):
+                if not self._tile_is_walkable(x, y):
+                    continue
+                distance = abs(x - preferred_x) + abs(y - preferred_y)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_tile = (x, y)
+        return best_tile
+
+    def _return_to_explore_after_victory(self):
+        if self.player:
+            player_center_x = self.player.x + self.player.width / 2
+            player_center_y = self.player.y + self.player.height / 2
+            preferred_grid_x = round((player_center_x - TILE_SIZE / 2) / TILE_SIZE)
+            preferred_grid_y = round((player_center_y - TILE_SIZE / 2) / TILE_SIZE)
+            landing_tile = self._nearest_walkable_tile(preferred_grid_x, preferred_grid_y)
+            if landing_tile:
+                self._set_player_grid_position(landing_tile[0], landing_tile[1])
+
+        self.enemy = None
+        self.player_velocity = [0, 0]
+        self.player_motion = [0.0, 0.0]
+        self.enemy_velocity = [0, 0]
+        self.active_mines = []
+        self.active_hazards = []
+        self.active_sigils = []
+        self.enemy_turns_taken = 0
+        self.selected_battle_target = 0
+        self.attack_choice_deadline_ms = None
+        self.encounter_objective = {"type": "defeat", "label": "Defeat the foe"}
+        self.enemy_config_for_battle = None
+        self.state = GameState.EXPLORE
+
+    def _nearest_edge_landing_tile(self, preferred_x: int, preferred_y: int) -> Optional[tuple[int, int]]:
+        preferred_x = max(0, min(int(preferred_x), self.map_width - 1))
+        preferred_y = max(0, min(int(preferred_y), self.map_height - 1))
+        best_tile = None
+        best_distance = 999999
+
+        for y in range(self.map_height):
+            for x in range(self.map_width):
+                if not self._tile_is_map_edge_landing(x, y):
+                    continue
+                distance = abs(x - preferred_x) + abs(y - preferred_y)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_tile = (x, y)
+        return best_tile
+
+    def _edge_landing_tile_after_travel(self, direction: str, source_x: int, source_y: int) -> Optional[tuple[int, int]]:
+        if direction == "right":
+            preferred_x = 1 if self.map_width > 1 else 0
+            preferred_y = max(0, min(source_y, self.map_height - 1))
+        elif direction == "left":
+            preferred_x = self.map_width - 2 if self.map_width > 1 else 0
+            preferred_y = max(0, min(source_y, self.map_height - 1))
+        elif direction == "down":
+            preferred_x = max(0, min(source_x, self.map_width - 1))
+            preferred_y = 1 if self.map_height > 1 else 0
+        elif direction == "up":
+            preferred_x = max(0, min(source_x, self.map_width - 1))
+            preferred_y = self.map_height - 2 if self.map_height > 1 else 0
+        else:
+            return None
+        return self._nearest_edge_landing_tile(preferred_x, preferred_y)
     
     def _travel_to_map(self, new_map_index: int, target_entry_id: Optional[str] = None):
         """Travel to another map and place the player at a configured entry point."""
-        if not self.map_data or new_map_index == self.current_map_index:
+        if not self.map_data:
             return
 
         self.current_map_index = new_map_index % len(self.map_data)
@@ -1027,24 +1413,13 @@ class Game:
                 break
 
         if target_entry:
-            self.player_grid_x = max(0, min(int(target_entry.get("grid_x", 0)), self.map_width - 1))
-            self.player_grid_y = max(0, min(int(target_entry.get("grid_y", 0)), self.map_height - 1))
+            destination_x = int(target_entry.get("grid_x", 0))
+            destination_y = int(target_entry.get("grid_y", 0))
         else:
-            self.player_grid_x = min(self.player_grid_x, self.map_width - 1)
-            self.player_grid_y = min(self.player_grid_y, self.map_height - 1)
+            destination_x = min(self.player_grid_x, self.map_width - 1)
+            destination_y = min(self.player_grid_y, self.map_height - 1)
 
-        self.player_target_x = self.player_grid_x
-        self.player_target_y = self.player_grid_y
-        self.player_move_start_x = self.player_grid_x
-        self.player_move_start_y = self.player_grid_y
-        self.player_move_progress = 0.0
-        self.player_moving = False
-        self.player.x, self.player.y = self._grid_to_pixel_position(
-            self.player_grid_x,
-            self.player_grid_y,
-            self.player.width,
-            self.player.height,
-        )
+        self._set_player_grid_position(destination_x, destination_y)
 
     def _activate_map_exit(self, grid_x: int, grid_y: int) -> bool:
         current_map = self._current_map_info()
@@ -1059,6 +1434,53 @@ class Game:
                 self._message(exit_info["label"], 120)
             return True
         return False
+
+    def _edge_direction_for_target(self, target_grid_x: int, target_grid_y: int) -> Optional[str]:
+        if target_grid_x < 0:
+            return "left"
+        if target_grid_x >= self.map_width:
+            return "right"
+        if target_grid_y < 0:
+            return "up"
+        if target_grid_y >= self.map_height:
+            return "down"
+        return None
+
+    def _travel_via_map_edge(self, direction: str) -> bool:
+        if not self._tile_is_walkable(self.player_grid_x, self.player_grid_y):
+            return False
+
+        connection = self._current_map_info().get("connections", {}).get(direction)
+        if connection is None:
+            return False
+
+        source_x = self.player_grid_x
+        source_y = self.player_grid_y
+        target_entry_id = None
+        label = None
+        if isinstance(connection, dict):
+            target_map_id = connection.get("target_map_id")
+            target_entry_id = connection.get("target_entry_id")
+            label = connection.get("label")
+            target_index = self._map_index_by_id(str(target_map_id))
+        elif isinstance(connection, str):
+            target_index = self._map_index_by_id(connection)
+        else:
+            try:
+                target_index = int(connection)
+            except (TypeError, ValueError):
+                return False
+
+        if target_index is None or not 0 <= target_index < len(self.map_data):
+            return False
+
+        self._travel_to_map(target_index, target_entry_id)
+        landing_tile = self._edge_landing_tile_after_travel(direction, source_x, source_y)
+        if landing_tile:
+            self._set_player_grid_position(landing_tile[0], landing_tile[1])
+        if label:
+            self._message(str(label), 120)
+        return True
     
     def _check_map_boundaries(self):
         current_map = self._current_map_info()
@@ -1092,7 +1514,8 @@ class Game:
 
     def _begin_explore_move(self, target_grid_x: int, target_grid_y: int) -> bool:
         if not self._tile_in_bounds(target_grid_x, target_grid_y):
-            return False
+            direction = self._edge_direction_for_target(target_grid_x, target_grid_y)
+            return bool(direction and self._travel_via_map_edge(direction))
         if not self._tile_is_walkable(target_grid_x, target_grid_y):
             return False
         self.player_move_start_x = self.player_grid_x
@@ -1278,28 +1701,86 @@ class Game:
     def _draw_npc_dialogue(self):
         if not self.active_npc or self.show_shop:
             return
-        dialogue = self.active_npc.get("dialogue", [])
-        if not dialogue:
+        entry = self._current_npc_dialogue_entry()
+        if entry is None:
             return
-        box_width = 700
-        box_height = 120
+        box_width = min(820, SCREEN_WIDTH - 80)
+        choices = self._npc_entry_choices(entry)
+        box_height = 196 if choices else 142
         box_x = SCREEN_WIDTH // 2 - box_width // 2
         box_y = SCREEN_HEIGHT - box_height - 20
-        pygame.draw.rect(self.screen, (20, 20, 35), (box_x, box_y, box_width, box_height))
-        pygame.draw.rect(self.screen, YELLOW, (box_x, box_y, box_width, box_height), 2)
-        name_text = self.font_small.render(self.active_npc["name"], True, YELLOW)
-        self.screen.blit(name_text, (box_x + 16, box_y + 12))
-        line = dialogue[self.npc_dialogue_index]
-        line_text = self.font_small.render(line, True, WHITE)
-        self.screen.blit(line_text, (box_x + 16, box_y + 40))
-        total = len(dialogue)
-        if self.npc_dialogue_index < total - 1:
-            hint = self.font_small.render("Space - Next", True, GRAY)
+
+        shadow = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        pygame.draw.rect(shadow, (0, 0, 0, 95), shadow.get_rect(), border_radius=10)
+        self.screen.blit(shadow, (box_x + 7, box_y + 7))
+
+        panel = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (16, 18, 31, 238), panel.get_rect(), border_radius=10)
+        pygame.draw.rect(panel, (47, 54, 82, 180), (0, 0, box_width, 42), border_radius=10)
+        pygame.draw.line(panel, (255, 222, 118, 150), (18, 43), (box_width - 18, 43), 1)
+        self.screen.blit(panel, (box_x, box_y))
+        pygame.draw.rect(self.screen, (255, 224, 118), (box_x, box_y, box_width, box_height), 2, border_radius=10)
+        pygame.draw.rect(self.screen, (108, 122, 170), (box_x + 4, box_y + 4, box_width - 8, box_height - 8), 1, border_radius=8)
+
+        portrait_rect = pygame.Rect(box_x + 18, box_y + 17, 50, 50)
+        npc_color = tuple(self.active_npc.get("color", [255, 220, 120]))
+        pygame.draw.rect(self.screen, (28, 31, 48), portrait_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (226, 214, 164), portrait_rect, 2, border_radius=8)
+        pygame.draw.circle(self.screen, npc_color, portrait_rect.center, 16)
+        pygame.draw.circle(self.screen, (255, 255, 255), (portrait_rect.centerx - 5, portrait_rect.centery - 5), 4)
+
+        nameplate_rect = pygame.Rect(box_x + 82, box_y + 13, min(280, box_width - 190), 28)
+        pygame.draw.rect(self.screen, (89, 72, 36), nameplate_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (255, 224, 118), nameplate_rect, 1, border_radius=6)
+        name_text = self.font_small.render(self.active_npc["name"], True, (255, 238, 166))
+        self.screen.blit(name_text, (nameplate_rect.x + 12, nameplate_rect.y + 5))
+
+        line = self._npc_entry_text(entry)
+        line_x = box_x + 86
+        line_y = box_y + 55
+        line_width = box_width - 112
+        for wrapped_line in self._wrap_text_lines(self.font_small, line, line_width)[:3]:
+            line_text = self.font_small.render(wrapped_line, True, (238, 241, 250))
+            self.screen.blit(line_text, (line_x, line_y))
+            line_y += self.font_small.get_linesize()
+
+        if choices:
+            choice_y = max(line_y + 8, box_y + 96)
+            for choice_index, choice in enumerate(choices[:4]):
+                selected = choice_index == self.npc_choice_index
+                choice_rect = pygame.Rect(box_x + 84, choice_y - 2, box_width - 116, 24)
+                if selected:
+                    pygame.draw.rect(self.screen, (88, 75, 38), choice_rect, border_radius=6)
+                    pygame.draw.rect(self.screen, (255, 224, 118), choice_rect, 1, border_radius=6)
+                    marker_color = (255, 224, 118)
+                else:
+                    pygame.draw.rect(self.screen, (27, 31, 48), choice_rect, border_radius=6)
+                    marker_color = (126, 136, 164)
+                pygame.draw.circle(self.screen, marker_color, (choice_rect.x + 12, choice_rect.centery), 4)
+                choice_color = (255, 238, 166) if selected else (214, 220, 236)
+                label = str(choice.get("text", f"Choice {choice_index + 1}"))
+                choice_text = self.font_small.render(f"{choice_index + 1}. {label}", True, choice_color)
+                self.screen.blit(choice_text, (choice_rect.x + 26, choice_rect.y + 3))
+                choice_y += 28
+            hint = self.font_small.render("W/S choose  Enter/Space confirm  Esc close", True, (156, 164, 184))
+        elif self.npc_dialogue_index < len(self.active_npc.get("dialogue", [])) - 1:
+            hint = self.font_small.render("Space - Next", True, (156, 164, 184))
         elif self.active_npc.get("shop"):
-            hint = self.font_small.render("Space - Open Shop", True, GRAY)
+            hint = self.font_small.render("Space - Open Shop", True, (156, 164, 184))
         else:
-            hint = self.font_small.render("Space - Close", True, GRAY)
+            hint = self.font_small.render("Space - Close", True, (156, 164, 184))
         self.screen.blit(hint, (box_x + box_width - hint.get_width() - 16, box_y + box_height - 26))
+
+        if not choices:
+            pulse = 0.45 + 0.55 * math.sin(pygame.time.get_ticks() / 170)
+            arrow_color = (255, int(190 + 45 * pulse), 92)
+            arrow_x = box_x + box_width - 32
+            arrow_y = box_y + box_height - 54 + int(2 * pulse)
+            pygame.draw.polygon(
+                self.screen,
+                arrow_color,
+                [(arrow_x, arrow_y), (arrow_x + 12, arrow_y), (arrow_x + 6, arrow_y + 8)],
+            )
 
     def _draw_shop(self):
         if not self.active_npc or not self.show_shop:
@@ -1317,7 +1798,7 @@ class Game:
         self.screen.blit(gold_text, (box_x + box_width - gold_text.get_width() - 20, box_y + 20))
         for i, shop_entry in enumerate(shop_items):
             item_data = items.get(shop_entry["item_id"], {})
-            price = shop_entry.get("price", 0)
+            price = self._shop_price(shop_entry, item_data)
             selected = i == self.shop_selection
             color = YELLOW if selected else get_item_rarity_color(item_data)
             prefix = ">> " if selected else "   "
@@ -1949,6 +2430,7 @@ class Game:
         self.player_velocity = [0, 0]
         self.enemy_velocity = [0, 0]
         self.enemy_turns_taken = 0
+        self.current_battle_move_memory = {}
         self.player.x = 120
         self.player.y = SCREEN_HEIGHT // 2 - 24
         self._start_battle_turn_order()
@@ -1997,6 +2479,10 @@ class Game:
                     self._handle_bestiary_input(event)
                     continue
 
+                if self.show_quest_log:
+                    self._handle_quest_log_input(event)
+                    continue
+
                 if self.active_attack_cutscene:
                     continue
 
@@ -2012,8 +2498,7 @@ class Game:
                     if self.show_shop and self.active_npc:
                         shop_items = self.active_npc.get("shop", [])
                         if event.key in [pygame.K_ESCAPE, pygame.K_e]:
-                            self.show_shop = False
-                            self.active_npc = None
+                            self._close_npc_interaction()
                         elif event.key in [pygame.K_UP, pygame.K_w]:
                             self.shop_selection = (self.shop_selection - 1) % max(1, len(shop_items))
                         elif event.key in [pygame.K_DOWN, pygame.K_s]:
@@ -2021,7 +2506,7 @@ class Game:
                         elif event.key in [pygame.K_RETURN, pygame.K_SPACE]:
                             if shop_items:
                                 chosen = shop_items[self.shop_selection]
-                                price = chosen.get("price", 0)
+                                price = self._shop_price(chosen, items.get(chosen["item_id"], {}))
                                 if self.gold >= price:
                                     self.gold -= price
                                     self._add_item_to_inventory(chosen["item_id"])
@@ -2031,23 +2516,31 @@ class Game:
                                     
                     elif self.active_npc:
                         if event.key in [pygame.K_ESCAPE]:
-                            self.active_npc = None
-                            self.npc_dialogue_index = 0
+                            self._close_npc_interaction()
+                        elif self._npc_entry_choices(self._current_npc_dialogue_entry()):
+                            choices = self._npc_entry_choices(self._current_npc_dialogue_entry())
+                            if event.key in [pygame.K_UP, pygame.K_w]:
+                                self.npc_choice_index = (self.npc_choice_index - 1) % len(choices)
+                            elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                                self.npc_choice_index = (self.npc_choice_index + 1) % len(choices)
+                            elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
+                                key_choices = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]
+                                chosen_index = key_choices.index(event.key)
+                                if chosen_index < len(choices):
+                                    self.npc_choice_index = chosen_index
+                                    self._advance_npc_dialogue()
+                            elif event.key in [pygame.K_e, pygame.K_RETURN, pygame.K_SPACE]:
+                                self._advance_npc_dialogue()
                         elif event.key in [pygame.K_e, pygame.K_RETURN, pygame.K_SPACE]:
-                            dialogue = self.active_npc.get("dialogue", [])
-                            if self.npc_dialogue_index < len(dialogue) - 1:
-                                self.npc_dialogue_index += 1
-                            elif self.active_npc.get("shop"):
-                                self.show_shop = True
-                            else:
-                                self.active_npc = None
-                                self.npc_dialogue_index = 0
+                            self._advance_npc_dialogue()
                     else:
                         # Handle exploration input when not in an NPC interaction.
                         if event.key == pygame.K_i:
                             self._open_inventory()
                         elif event.key == pygame.K_b:
                             self._open_bestiary()
+                        elif event.key == pygame.K_j:
+                            self._open_quest_log()
                         elif event.key == pygame.K_e:
                             nearby_npc = self._get_nearby_npc()
                             if nearby_npc:
@@ -2096,17 +2589,19 @@ class Game:
                         self.player_recover()
                     elif event.key == pygame.K_f:
                         self.player_dodge()
+                    elif event.key == pygame.K_o:
+                        self.player_observe()
                 
                 elif self.state in [GameState.PLAYER_LOST]:
                     if event.key == pygame.K_SPACE:
                         self._return_to_root_home_after_faint()
                 elif self.state in [GameState.PLAYER_WON]:
                     if event.key == pygame.K_SPACE:
-                        self.state = GameState.EXPLORE
+                        self._return_to_explore_after_victory()
             
             elif event.type == pygame.KEYUP:
                 # Stop movement
-                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_quit_confirm and not self.show_save_confirm and not self.show_inventory and not self.show_bestiary:
+                if self.state in [GameState.EXPLORE, GameState.BATTLE] and not self.show_reset_confirm and not self.show_quit_confirm and not self.show_save_confirm and not self.show_inventory and not self.show_bestiary and not self.show_quest_log:
                     if event.key in [pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s]:
                         self.player_velocity[1] = 0
                     elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d]:
@@ -2206,6 +2701,27 @@ class Game:
 
         self.player.next_dodge_chance = 0.75
         self._message("Dodge ready! 75% chance to evade the next attack.", 180)
+        self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
+
+    def player_observe(self):
+        """Study the enemy's pattern and deepen Archivist alignment."""
+        if not self._begin_turn(self.player, self.enemy, is_player_turn=True):
+            return
+        if not self.enemy:
+            return
+
+        self._plan_enemy_intent()
+        enemy_id = getattr(self.enemy, "character_id", self.enemy.name.lower())
+        self.observed_enemy_ids.add(enemy_id)
+        self.bestiary_seen.add(enemy_id)
+        self.bestiary_counts.setdefault(enemy_id, 0)
+        self._change_faction_progress({"archivists": 1})
+
+        intent = getattr(self.enemy, "intent_data", None) or {}
+        intent_label = intent.get("label", "an uncertain action")
+        objective_label = self.encounter_objective.get("label", "Defeat the foe")
+        self._message(f"Observed {self.enemy.name}: likely {intent_label}.", 190)
+        self._message(f"Objective note: {objective_label}.", 170)
         self._finish_turn(self.player, next_state=GameState.ENEMY_TURN)
 
     def _distance_in_tiles(self, attacker: Character, target: Character) -> float:
@@ -2326,7 +2842,8 @@ class Game:
 
         current_tile = self.terrain_map[self.player_grid_y][self.player_grid_x]
         terrain_theme = self._terrain_theme_from_tile(current_tile)
-        preferred_ids = self._terrain_enemy_ids().get(terrain_theme, [])
+        current_map_enemy_ids = self._current_map_info().get("enemy_ids", [])
+        preferred_ids = current_map_enemy_ids or self._terrain_enemy_ids().get(terrain_theme, [])
         terrain_pool = [
             enemy for enemy in self.enemy_data
             if enemy.get("id") in preferred_ids and not self._is_boss_enemy(enemy)
@@ -2699,7 +3216,58 @@ class Game:
             multiplier *= 1.2
         if attacker.has_status("empowered"):
             multiplier *= 1.3
+        alignment = self._dominant_faction_id()
+        if attacker == self.player:
+            if alignment == "spud_wardens" and any(t in attack_types for t in ("nature", "earth", "potato", "water")):
+                multiplier *= 1.12
+            elif alignment == "armada" and any(t in attack_types for t in ("metal", "fire", "lightning", "physical")):
+                multiplier *= 1.14
+            elif alignment == "archivists" and any(t in attack_types for t in ("crystal", "void", "lightning")):
+                multiplier *= 1.12
+            elif alignment == "true_neutral":
+                multiplier *= 1.06
+        elif attacker == self.enemy:
+            if alignment == "spud_wardens":
+                multiplier *= 0.94
+            elif alignment == "armada":
+                multiplier *= 1.08
         return multiplier
+
+    def _player_memory_multiplier(self, attack_id: str) -> float:
+        battle_count = self.current_battle_move_memory.get(attack_id, 0) + 1
+        total_count = self.move_memory_counts.get(attack_id, 0) + 1
+        self.current_battle_move_memory[attack_id] = battle_count
+        self.move_memory_counts[attack_id] = total_count
+
+        if battle_count == 2:
+            self._message("Memory stack: repetition strengthens the move.", 150)
+            return 1.08
+        if battle_count == 3:
+            alignment = self._dominant_faction_id()
+            if alignment == "archivists":
+                self._message("Archivist echo: the move repeats with clearer truth.", 170)
+                return 1.18
+            if alignment == "armada":
+                self._message("Armada pattern: the move locks into protocol.", 170)
+                return 1.16
+            if alignment == "spud_wardens":
+                self._message("Warden memory: the move stabilizes instead of spiking.", 170)
+                self.player.stats.current_hp = min(self.player.stats.max_hp, self.player.stats.current_hp + 8)
+                return 1.08
+            self._message("Memory distortion trembles around the repeated move.", 170)
+            return 1.1
+        if battle_count >= 4:
+            alignment = self._dominant_faction_id()
+            if alignment == "archivists" and random.random() < 0.45:
+                self._message("Contradictory truth: the repetition becomes an echo attack.", 180)
+                return 1.35
+            if alignment == "true_neutral" and random.random() < 0.35:
+                self._message("Root Keeper: no path can classify that repetition.", 180)
+                return 1.25
+            self._message("Memory distortion backfires from overuse.", 180)
+            self._apply_guaranteed_self_damage(self.player, 8 + battle_count * 2)
+            return 0.8
+        return 1.0
 
     def _register_enemy_defeat(self, defeated: Character):
         if not self.player:
@@ -2849,6 +3417,10 @@ class Game:
             old_hp = self.player.stats.current_hp
             self.player.stats.current_hp = min(self.player.stats.max_hp, self.player.stats.current_hp + value)
             healed = self.player.stats.current_hp - old_hp
+            if self._dominant_faction_id() == "spud_wardens" and healed > 0:
+                bonus_heal = min(self.player.stats.max_hp - self.player.stats.current_hp, max(1, healed * 0.15))
+                self.player.stats.current_hp += bonus_heal
+                healed += bonus_heal
             self._message(f"Used {item_data['name']}! Restored {healed:.0f} HP.", 180)
             used = healed > 0
         elif effect_type == "ability_charges":
@@ -2901,6 +3473,29 @@ class Game:
 
     def _close_bestiary(self):
         self.show_bestiary = False
+
+    def _open_quest_log(self):
+        self.show_quest_log = True
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+        self.player_motion = [0.0, 0.0]
+        self.player_moving = False
+        self.quest_log_selection = min(self.quest_log_selection, max(0, len(self.accepted_quests) - 1))
+
+    def _close_quest_log(self):
+        self.show_quest_log = False
+
+    def _handle_quest_log_input(self, event):
+        quest_ids = sorted(self.accepted_quests)
+        if event.key in [pygame.K_ESCAPE, pygame.K_j]:
+            self._close_quest_log()
+            return
+        if not quest_ids:
+            return
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.quest_log_selection = (self.quest_log_selection - 1) % len(quest_ids)
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+            self.quest_log_selection = (self.quest_log_selection + 1) % len(quest_ids)
 
     def _handle_bestiary_input(self, event):
         if not self.enemy_data:
@@ -3172,6 +3767,89 @@ class Game:
         page_text = self.font_small.render(f"Page {self.bestiary_page + 1}/{max_page + 1}", True, WHITE)
         self.screen.blit(page_text, (list_x, box_y + box_height - 70))
         hint_text = self.font_small.render("W/S select  A/D or Q/E page  B/Esc close", True, GRAY)
+        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 42))
+
+    def _draw_quest_log_overlay(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 182))
+        self.screen.blit(overlay, (0, 0))
+
+        box_width = 820
+        box_height = 500
+        box_x = SCREEN_WIDTH // 2 - box_width // 2
+        box_y = SCREEN_HEIGHT // 2 - box_height // 2
+        panel_rect = pygame.Rect(box_x, box_y, box_width, box_height)
+        pygame.draw.rect(self.screen, (31, 34, 50), panel_rect, border_radius=4)
+        pygame.draw.rect(self.screen, (236, 238, 246), panel_rect, 3, border_radius=4)
+
+        title = self.font_large.render("Quest Journal", True, YELLOW)
+        self.screen.blit(title, (box_x + 24, box_y + 20))
+
+        quest_ids = sorted(self.accepted_quests)
+        catalog = self._quest_catalog()
+        list_x = box_x + 24
+        list_y = box_y + 78
+        list_width = 300
+        detail_x = list_x + list_width + 24
+        detail_width = box_width - (detail_x - box_x) - 24
+        list_rect = pygame.Rect(list_x, list_y, list_width, 330)
+        detail_rect = pygame.Rect(detail_x, list_y, detail_width, 330)
+        pygame.draw.rect(self.screen, (25, 28, 42), list_rect)
+        pygame.draw.rect(self.screen, (124, 126, 160), list_rect, 2)
+        pygame.draw.rect(self.screen, (25, 28, 42), detail_rect)
+        pygame.draw.rect(self.screen, (124, 126, 160), detail_rect, 2)
+
+        if not quest_ids:
+            empty_text = self.font_small.render("No active quests yet.", True, WHITE)
+            self.screen.blit(empty_text, (list_x + 14, list_y + 16))
+        else:
+            self.quest_log_selection = min(self.quest_log_selection, len(quest_ids) - 1)
+            row_height = 42
+            visible_count = 7
+            visible_start = max(0, min(self.quest_log_selection - 3, max(0, len(quest_ids) - visible_count)))
+            for row_index, quest_id in enumerate(quest_ids[visible_start:visible_start + visible_count]):
+                index = visible_start + row_index
+                quest_data = catalog.get(quest_id, {"name": quest_id})
+                selected = index == self.quest_log_selection
+                row_rect = pygame.Rect(list_x + 8, list_y + 8 + row_index * (row_height + 6), list_width - 16, row_height)
+                pygame.draw.rect(self.screen, (73, 78, 112) if selected else (42, 45, 62), row_rect, border_radius=2)
+                pygame.draw.rect(self.screen, YELLOW if selected else (99, 102, 130), row_rect, 2, border_radius=2)
+                prefix = ">> " if selected else ""
+                name_text = self.font_small.render(prefix + quest_data.get("name", quest_id), True, WHITE)
+                self.screen.blit(name_text, (row_rect.x + 10, row_rect.y + 11))
+
+            selected_id = quest_ids[self.quest_log_selection]
+            selected = catalog.get(selected_id, {"name": selected_id, "description": "No quest notes yet.", "faction": {}, "giver": "Unknown"})
+            detail_title = self.font_large.render(selected.get("name", selected_id), True, YELLOW)
+            self.screen.blit(detail_title, (detail_x + 16, list_y + 16))
+            giver_text = self.font_small.render(f"Giver: {selected.get('giver', 'Unknown')}", True, GRAY)
+            self.screen.blit(giver_text, (detail_x + 16, list_y + 56))
+
+            desc_y = list_y + 96
+            for line in self._wrap_text_lines(self.font_small, selected.get("description", "No quest notes yet."), detail_width - 32)[:6]:
+                desc_text = self.font_small.render(line, True, WHITE)
+                self.screen.blit(desc_text, (detail_x + 16, desc_y))
+                desc_y += self.font_small.get_linesize()
+
+            faction_changes = selected.get("faction", {})
+            faction_title = self.font_small.render("Faction impact", True, YELLOW)
+            self.screen.blit(faction_title, (detail_x + 16, list_y + 238))
+            faction_y = list_y + 268
+            if isinstance(faction_changes, dict) and faction_changes:
+                for faction_id, amount in faction_changes.items():
+                    faction_name = FACTIONS.get(faction_id, {}).get("name", faction_id)
+                    amount_int = int(amount)
+                    color = FACTIONS.get(faction_id, {}).get("color", WHITE) if amount_int >= 0 else (210, 92, 92)
+                    line = self.font_small.render(f"{faction_name}: {amount_int:+d}", True, color)
+                    self.screen.blit(line, (detail_x + 16, faction_y))
+                    faction_y += 24
+            else:
+                none_text = self.font_small.render("None recorded.", True, GRAY)
+                self.screen.blit(none_text, (detail_x + 16, faction_y))
+
+        count_text = self.font_small.render(f"Active quests: {len(quest_ids)}", True, WHITE)
+        self.screen.blit(count_text, (box_x + 24, box_y + box_height - 70))
+        hint_text = self.font_small.render("J/Esc close  W/S select", True, GRAY)
         self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 42))
 
     def _add_item_to_inventory(self, item_id: str, amount: int = 1):
@@ -3734,6 +4412,8 @@ class Game:
         type_multiplier = self._type_multiplier(attack_types, getattr(target, "types", ["neutral"]))
         damage *= type_multiplier
         damage *= self._battle_damage_multiplier(attack_types, attacker, target)
+        if is_player_turn and attack_id != INSTINCT_ATTACK_ID:
+            damage *= self._player_memory_multiplier(attack_id)
         if attack_data.get("self_damage", 0):
             self_hit = self._apply_guaranteed_self_damage(attacker, float(attack_data.get("self_damage", 0)))
             if self_hit > 0:
@@ -3918,7 +4598,7 @@ class Game:
     
     def update_explore(self):
         """Update exploration state - grid-based movement and random encounters"""
-        if self.show_inventory or self.show_bestiary or self.active_npc or self.show_shop:
+        if self.show_inventory or self.show_bestiary or self.show_quest_log or self.active_npc or self.show_shop:
             return
 
         # Handle grid-based movement
@@ -3971,7 +4651,11 @@ class Game:
                 self._check_map_boundaries()
 
                 current_terrain = self.terrain_map[self.player_grid_y][self.player_grid_x]
-                encounter_chance = 0.00 if current_terrain == TERRAIN_NOSPAWN else (0.05 if current_terrain == TERRAIN_GRASS else 0.01)
+                current_map_is_safe = bool(self._current_map_info().get("safe_zone"))
+                if current_map_is_safe or current_terrain == TERRAIN_NOSPAWN:
+                    encounter_chance = 0.0
+                else:
+                    encounter_chance = 0.05 if current_terrain == TERRAIN_GRASS else 0.01
 
                 if random.random() < encounter_chance:
                     self.create_random_enemy()
@@ -4042,6 +4726,9 @@ class Game:
 
         if self.show_bestiary:
             self._draw_bestiary_overlay()
+
+        if self.show_quest_log:
+            self._draw_quest_log_overlay()
 
         if self.active_attack_cutscene:
             self._draw_attack_cutscene()
@@ -4187,11 +4874,12 @@ class Game:
             "WASD/Arrows - Move",
             "I - Open Inventory / Equipment",
             "B - Open Bestiary",
+            "J - Open Quest Journal",
             "Use doors/exits to change maps",
             "Ctrl+S Save (Explore only)",
         ]
-        panel_width = 320
-        panel_height = 146
+        panel_width = 340
+        panel_height = 286
         panel_x = SCREEN_WIDTH - panel_width - 12
         panel_y = 8
         panel_surface = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
@@ -4204,6 +4892,21 @@ class Game:
             text = self.font_small.render(instruction, True, hud_muted)
             self.screen.blit(text, (panel_x + 10, inst_y))
             inst_y += 26
+
+        faction_title = self.font_small.render("Faction Standing", True, hud_name)
+        self.screen.blit(faction_title, (panel_x + 10, inst_y + 4))
+        faction_y = inst_y + 30
+        for faction_id, faction_info in FACTIONS.items():
+            value = int(self.faction_progress.get(faction_id, 0))
+            color = faction_info["color"] if value >= 0 else (180, 82, 82)
+            standing_text = self.font_small.render(f"{faction_info['name']}: {value:+d}", True, color)
+            self.screen.blit(standing_text, (panel_x + 14, faction_y))
+            faction_y += 22
+        alignment = self._alignment_label()
+        alignment_text = self.font_small.render(f"Alignment: {alignment}", True, hud_muted)
+        self.screen.blit(alignment_text, (panel_x + 14, faction_y + 2))
+        faint_text = self.font_small.render(f"Faints Remembered: {self.faint_count}", True, hud_muted)
+        self.screen.blit(faint_text, (panel_x + 14, faction_y + 24))
         
         # Draw recent messages below the stat block so they don't cover the map center
         msg_y = 250
@@ -4457,7 +5160,7 @@ class Game:
             self.screen.blit(instinct_text, (20, attack_y - 28))
         
         # Draw movement instructions
-        move_text = self.font_small.render("WASD move, T target, SPACE attack, Q/E page, R recover, F dodge, I inventory", True, GRAY)
+        move_text = self.font_small.render("WASD move, T target, SPACE attack, O observe, Q/E page, R recover, F dodge, I inventory", True, GRAY)
         move_x = max(20, SCREEN_WIDTH - move_text.get_width() - 20)
         self.screen.blit(move_text, (move_x, SCREEN_HEIGHT - 24))
         
@@ -4630,13 +5333,22 @@ class Game:
         self.active_sigils = []
         self.enemy_turns_taken = 0
         self.selected_battle_target = 0
+        self.current_battle_move_memory = {}
         self.show_inventory = False
         self.show_bestiary = False
+        self.show_quest_log = False
+        self.quest_log_selection = 0
         self.gold = 100
-        self.faction_progress = {}
+        self.faction_progress = {faction_id: 0 for faction_id in FACTIONS}
+        self.accepted_quests = set()
+        self.npc_action_history = set()
+        self.faint_count = 0
+        self.move_memory_counts = {}
+        self.observed_enemy_ids = set()
         self.npcs = []
         self.active_npc = None
         self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
         self.show_shop = False
         self.shop_selection = 0
         self.bestiary_counts = {}
@@ -4687,6 +5399,7 @@ class Game:
                 self.player.width,
                 self.player.height,
             )
+        self.faint_count += 1
         self.enemy = None
         self.player.stats.current_hp = self.player.stats.max_hp
         self.player.status_effects = {}
@@ -4708,9 +5421,11 @@ class Game:
         self.enemy_config_for_battle = None
         self.show_inventory = False
         self.show_bestiary = False
+        self.show_quest_log = False
         self.show_shop = False
         self.active_npc = None
         self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
         self.state = GameState.EXPLORE
         self.messages = []
         self._message("You awaken in Root Home.", 220)
@@ -4838,7 +5553,12 @@ class Game:
             "bestiary_elite_counts": {enemy_id: int(count) for enemy_id, count in self.bestiary_elite_counts.items()},
             "bestiary_elite_seen": sorted(self.bestiary_elite_seen),
             "bosses_defeated": sorted(self.bosses_defeated),
-            "faction_progress": self.faction_progress,
+            "faction_progress": {faction_id: int(self.faction_progress.get(faction_id, 0)) for faction_id in FACTIONS},
+            "accepted_quests": sorted(self.accepted_quests),
+            "npc_action_history": sorted(self.npc_action_history),
+            "faint_count": int(self.faint_count),
+            "move_memory_counts": {attack_id: int(count) for attack_id, count in self.move_memory_counts.items()},
+            "observed_enemy_ids": sorted(self.observed_enemy_ids),
             "player": self._serialize_character(self.player),
         }
         try:
@@ -4908,7 +5628,20 @@ class Game:
         self.bestiary_elite_counts = {enemy_id: int(count) for enemy_id, count in save_data.get("bestiary_elite_counts", {}).items()}
         self.bestiary_elite_seen = set(str(enemy_id) for enemy_id in save_data.get("bestiary_elite_seen", []))
         self.bosses_defeated = set(str(enemy_id) for enemy_id in save_data.get("bosses_defeated", []))
-        self.faction_progress = dict(save_data.get("faction_progress", {}))
+        loaded_factions = save_data.get("faction_progress", {})
+        self.faction_progress = {
+            faction_id: int(loaded_factions.get(faction_id, 0))
+            for faction_id in FACTIONS
+        }
+        self.accepted_quests = set(str(quest_id) for quest_id in save_data.get("accepted_quests", []))
+        self.npc_action_history = set(str(action_key) for action_key in save_data.get("npc_action_history", []))
+        self.faint_count = int(save_data.get("faint_count", 0))
+        self.move_memory_counts = {
+            str(attack_id): int(count)
+            for attack_id, count in save_data.get("move_memory_counts", {}).items()
+        }
+        self.current_battle_move_memory = {}
+        self.observed_enemy_ids = set(str(enemy_id) for enemy_id in save_data.get("observed_enemy_ids", []))
 
         self.enemy = None
         self.state = GameState.EXPLORE
@@ -4929,9 +5662,12 @@ class Game:
         self.show_bestiary = False
         self.bestiary_selection = 0
         self.bestiary_page = 0
+        self.show_quest_log = False
+        self.quest_log_selection = 0
         self.show_shop = False
         self.active_npc = None
         self.npc_dialogue_index = 0
+        self.npc_choice_index = 0
         self.show_quit_confirm = False
         self.quit_confirm_choice = 1
         self.show_save_confirm = False
