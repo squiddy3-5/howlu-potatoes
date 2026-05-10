@@ -11,20 +11,121 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict
 
 try:
-    from PIL import Image, ImageSequence
+    from PIL import Image, ImageSequence, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except Exception:
     Image = None
     ImageSequence = None
+    ImageDraw = None
+    ImageFont = None
     PIL_AVAILABLE = False
 
 
+class FontFallback:
+    FONT_CANDIDATES = [
+        "Verdana.ttf",
+        "Arial.ttf",
+        "DejaVuSans.ttf",
+        "LiberationSans-Regular.ttf",
+    ]
+
+    def __init__(self, size: int):
+        self._size = size
+        self._font = None
+        if PIL_AVAILABLE:
+            for candidate in self.FONT_CANDIDATES:
+                try:
+                    self._font = ImageFont.truetype(candidate, size)
+                    break
+                except Exception:
+                    self._font = None
+            if self._font is None:
+                try:
+                    self._font = ImageFont.load_default()
+                except Exception:
+                    self._font = None
+
+    def render(self, text, antialias, color, background=None):
+        if not PIL_AVAILABLE or self._font is None:
+            return pygame.Surface((0, 0), pygame.SRCALPHA)
+
+        color_tuple = tuple(color) if isinstance(color, (list, tuple)) else (255, 255, 255)
+        if len(color_tuple) == 3:
+            color_tuple = (*color_tuple, 255)
+
+        try:
+            dummy_image = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(dummy_image)
+            bbox = draw.textbbox((0, 0), str(text), font=self._font)
+            width = max(1, bbox[2] - bbox[0])
+            height = max(1, bbox[3] - bbox[1])
+            x_offset = -bbox[0]
+            y_offset = -bbox[1]
+        except Exception:
+            width = max(1, len(str(text)) * (self._size // 2))
+            height = self._size
+            x_offset = 0
+            y_offset = 0
+
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.text((x_offset, y_offset), str(text), font=self._font, fill=color_tuple)
+        surface = pygame.image.fromstring(image.tobytes(), image.size, image.mode)
+        return surface
+
+    def get_linesize(self):
+        if self._font is None:
+            return self._size + 6
+        try:
+            ascent, descent = self._font.getmetrics()
+            return ascent + descent + 6
+        except Exception:
+            return self._size + 6
+
+    def size(self, text: str) -> tuple:
+        if not PIL_AVAILABLE or self._font is None:
+            return (max(1, len(str(text)) * (self._size // 2)), self._size)
+        try:
+            dummy_image = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(dummy_image)
+            bbox = draw.textbbox((0, 0), str(text), font=self._font)
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            return (max(1, width), max(1, height))
+        except Exception:
+            return (max(1, len(str(text)) * (self._size // 2)), self._size)
+
+
+def create_font(size: int):
+    try:
+        return pygame.font.Font(None, size)
+    except (AttributeError, NotImplementedError, ModuleNotFoundError):
+        print(f"Warning: pygame.font unavailable; using fallback font for size {size}.")
+        return FontFallback(size)
+
+
+base_path = os.path.dirname(__file__)
+jsons_path = os.path.join(base_path, "jsons")
+
+def json_file(filename: str) -> str:
+    return os.path.join(jsons_path, filename)
+
+
+def find_json_file(filename: str) -> str:
+    path = json_file(filename)
+    if os.path.exists(path):
+        return path
+    if filename == "attacks.json":
+        alternate = json_file("oldAttacks.json")
+        if os.path.exists(alternate):
+            return alternate
+    raise FileNotFoundError(f"Missing JSON file: {filename}")
 
 # Load attacks and items from JSON files
-with open("attacks.json", "r") as f:
+with open(find_json_file("attacks.json"), "r") as f:
     attacks = json.load(f)
 
-with open("items.json", "r") as f:
+with open(find_json_file("items.json"), "r") as f:
     items = json.load(f)
     
 # Initialize Pygame
@@ -105,6 +206,15 @@ FACTIONS = {
     "armada": {"name": "Armada", "color": (112, 168, 230)},
     "archivists": {"name": "Archivists", "color": (206, 176, 255)},
 }
+
+# Combat zones
+FRONT_ZONE = "FRONT"
+MID_ZONE = "MID"
+BACK_ZONE = "BACK"
+ZONE_DIST_FRONT_MAX = 2.0  # tiles
+ZONE_DIST_MID_MAX = 5.0
+ZONE_DIST_BACK_MIN = 6.0
+
 BESTIARY_RANKS = [
     (1, "Potato Scout", 0),
     (2, "Spud Seeker", 4),
@@ -550,10 +660,8 @@ class CharacterSelectionScreen:
             return
         self.selected_index = (self.selected_index + delta) % len(self.characters)
 
-    def _visible_row_count(self, surface_height: int) -> int:
+    def _visible_row_count(self, surface_height: int, row_h: int, row_gap: int) -> int:
         panel_y = 112
-        row_h = 92
-        row_gap = 12
         controls_y = surface_height - 34
         available_height = max(0, controls_y - 16 - panel_y)
         full_row_height = row_h + row_gap
@@ -605,9 +713,10 @@ class CharacterSelectionScreen:
         panel_x = 88
         panel_y = 112
         panel_w = SCREEN_WIDTH - panel_x * 2
-        row_h = 92
+        line_height = self.font_small.get_linesize()
+        row_h = max(92, 18 + line_height * 3 + 14)
         row_gap = 12
-        visible_rows = self._visible_row_count(surface.get_height())
+        visible_rows = self._visible_row_count(surface.get_height(), row_h, row_gap)
         self._ensure_selected_visible(visible_rows)
         start_index = self.scroll_index
         end_index = min(len(self.characters), start_index + visible_rows)
@@ -624,7 +733,7 @@ class CharacterSelectionScreen:
 
             char_id = str(char.get("id", char.get("name", "")))
             sprite = self.preview_sprites.get(char_id)
-            sprite_box = pygame.Rect(row_rect.x + 12, row_rect.y + 18, 56, 56)
+            sprite_box = pygame.Rect(row_rect.x + 12, row_rect.y + (row_h - 56) // 2, 56, 56)
             pygame.draw.rect(surface, (24, 28, 40), sprite_box, border_radius=6)
             pygame.draw.rect(surface, (120, 130, 160), sprite_box, 1, border_radius=6)
             if sprite:
@@ -634,10 +743,10 @@ class CharacterSelectionScreen:
 
             name_color = (255, 241, 176) if selected else (232, 238, 250)
             name_surface = self.font_small.render(str(char.get("name", "Unknown")), True, name_color)
-            surface.blit(name_surface, (row_rect.x + 82, row_rect.y + 12))
+            surface.blit(name_surface, (row_rect.x + 82, row_rect.y + 16))
 
             desc_surface = self.font_small.render(str(char.get("description", "")), True, (184, 194, 214))
-            surface.blit(desc_surface, (row_rect.x + 82, row_rect.y + 36))
+            surface.blit(desc_surface, (row_rect.x + 82, row_rect.y + 16 + line_height))
 
             stats = char.get("stats", {})
             stats_text = (
@@ -646,7 +755,7 @@ class CharacterSelectionScreen:
                 f"SPD {stats.get('speed', 0):.0f}  HP {stats.get('max_hp', 0):.0f}"
             )
             stats_surface = self.font_small.render(stats_text, True, (158, 172, 198))
-            surface.blit(stats_surface, (row_rect.x + 82, row_rect.y + 60))
+            surface.blit(stats_surface, (row_rect.x + 82, row_rect.y + 16 + line_height * 2))
 
         if start_index > 0:
             top_hint = self.font_small.render("... more above ...", True, (134, 146, 172))
@@ -664,7 +773,7 @@ class CharacterSelectionScreen:
 def load_character_data():
     """Load character and enemy data from JSON file"""
     try:
-        with open("characters.json", "r") as f:
+        with open(json_file("characters.json"), "r") as f:
             return json.load(f)
     except FileNotFoundError:
         print("Warning: characters.json not found, using default characters")
@@ -748,8 +857,8 @@ class Game:
                 pass
         self.clock = pygame.time.Clock()
         self.running = True
-        self.font_large = pygame.font.Font(None, 36)
-        self.font_small = pygame.font.Font(None, 24)
+        self.font_large = create_font(34)
+        self.font_small = create_font(20)
         self.state = GameState.CHARACTER_SELECT
         self.current_fps = 0.0
         
@@ -761,7 +870,7 @@ class Game:
         if self.character_data:
             self.available_characters = self.character_data.get("characters", [])
             self.enemy_data = self.character_data.get("enemies", [])
-            with open("maps.json", "r") as f:
+            with open(json_file("maps.json"), "r") as f:
                 map_data = json.load(f)
             self.map_data = map_data.get("maps", [])
             
@@ -800,6 +909,11 @@ class Game:
         self.bestiary_page = 0
         self.show_quest_log = False
         self.quest_log_selection = 0
+        self.show_menu = False
+        self.menu_tab_index = 0
+        self.menu_tabs = ["Items", "Attacks", "Bestiary", "Maps", "Quests"]
+        self.current_zone = None
+        self.in_combat = False
         self.attack_animation_cache: Dict[str, tuple[List[pygame.Surface], List[int]]] = {}
         self.active_attack_cutscene: Optional[Dict] = None
         self.active_mines: List[Dict] = []
@@ -979,7 +1093,7 @@ class Game:
         return self._generate_default_map()
     def _load_npcs(self):
         try:
-            with open("npcs.json", "r") as f:
+            with open(json_file("npcs.json"), "r") as f:
                 npc_data = json.load(f)
             self.npcs = npc_data.get("npcs", [])
         except FileNotFoundError:
@@ -2431,9 +2545,16 @@ class Game:
         self.enemy_velocity = [0, 0]
         self.enemy_turns_taken = 0
         self.current_battle_move_memory = {}
-        self.player.x = 120
-        self.player.y = SCREEN_HEIGHT // 2 - 24
-        self._start_battle_turn_order()
+        # Hybrid combat setup: enemy appears in world space
+        self.in_combat = True
+        self.enemy_grid_x = self.player_grid_x + random.randint(3, 6) * random.choice([-1, 1])
+        self.enemy_grid_y = self.player_grid_y + random.randint(3, 6) * random.choice([-1, 1])
+        self.enemy_grid_x = max(0, min(self.map_width - 1, self.enemy_grid_x))
+        self.enemy_grid_y = max(0, min(self.map_height - 1, self.enemy_grid_y))
+        self.enemy.x = self.enemy_grid_x * TILE_SIZE + TILE_SIZE // 2
+        self.enemy.y = self.enemy_grid_y * TILE_SIZE + TILE_SIZE // 2
+        self._message(f"A wild {self.enemy.name} appears!", 180)
+        self._update_combat_zone()
     
     def handle_events(self):
         for event in pygame.event.get():
@@ -2469,6 +2590,10 @@ class Game:
 
                 if self.show_save_confirm:
                     self.handle_save_confirmation_input(event)
+                    continue
+
+                if self.show_menu:
+                    self._handle_menu_input(event)
                     continue
 
                 if self.show_inventory:
@@ -2535,12 +2660,8 @@ class Game:
                             self._advance_npc_dialogue()
                     else:
                         # Handle exploration input when not in an NPC interaction.
-                        if event.key == pygame.K_i:
-                            self._open_inventory()
-                        elif event.key == pygame.K_b:
-                            self._open_bestiary()
-                        elif event.key == pygame.K_j:
-                            self._open_quest_log()
+                        if event.key == pygame.K_m:
+                            self._open_menu()
                         elif event.key == pygame.K_e:
                             nearby_npc = self._get_nearby_npc()
                             if nearby_npc:
@@ -2554,6 +2675,13 @@ class Game:
                         elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                             self.player_velocity[0] = 1
                 
+                # Handle combat input if in hybrid combat
+                if self.in_combat and self.enemy:
+                    if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
+                        attack_index = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4].index(event.key)
+                        if attack_index < len(self.player.attack_ids):
+                            attack_id = self.player.attack_ids[attack_index]
+                            self._perform_player_attack(attack_id)
                 
                 elif self.state == GameState.BATTLE:
                     # Movement in battle
@@ -3473,6 +3601,7 @@ class Game:
 
     def _close_bestiary(self):
         self.show_bestiary = False
+        self.show_menu = False
 
     def _open_quest_log(self):
         self.show_quest_log = True
@@ -3484,6 +3613,202 @@ class Game:
 
     def _close_quest_log(self):
         self.show_quest_log = False
+        self.show_menu = False
+
+    def _open_menu(self, tab_index: int = 0):
+        self.show_menu = True
+        self.menu_tab_index = max(0, min(tab_index, len(self.menu_tabs) - 1))
+        self.show_inventory = False
+        self.show_bestiary = False
+        self.show_quest_log = False
+        self.player_velocity = [0, 0]
+        self.enemy_velocity = [0, 0]
+        self.player_motion = [0.0, 0.0]
+        self.player_moving = False
+        self.inventory_selection = 0
+        self.bestiary_selection = min(self.bestiary_selection, max(0, len(self.enemy_data) - 1))
+        self.bestiary_page = self.bestiary_selection // 5 if self.enemy_data else 0
+        self.quest_log_selection = min(self.quest_log_selection, max(0, len(self.accepted_quests) - 1))
+
+    def _close_menu(self):
+        self.show_menu = False
+
+    def _handle_menu_input(self, event):
+        if event.key == pygame.K_ESCAPE:
+            self._close_menu()
+            return
+        if event.key == pygame.K_TAB:
+            self.menu_tab_index = (self.menu_tab_index + 1) % len(self.menu_tabs)
+            return
+        if event.key in [pygame.K_1, pygame.K_KP1]:
+            self.menu_tab_index = 0
+            return
+        if event.key in [pygame.K_2, pygame.K_KP2]:
+            self.menu_tab_index = 1
+            return
+        if event.key in [pygame.K_3, pygame.K_KP3]:
+            self.menu_tab_index = 2
+            return
+        if event.key in [pygame.K_4, pygame.K_KP4]:
+            self.menu_tab_index = 3
+            return
+        if event.key in [pygame.K_5, pygame.K_KP5]:
+            self.menu_tab_index = 4
+            return
+
+        if self.menu_tab_index == 0:
+            self._handle_inventory_input(event)
+        elif self.menu_tab_index == 1:
+            self._handle_attacks_menu_input(event)
+        elif self.menu_tab_index == 2:
+            self._handle_bestiary_input(event)
+        elif self.menu_tab_index == 3:
+            pass  # Maps panel is informational
+        elif self.menu_tab_index == 4:
+            self._handle_quest_log_input(event)
+
+    def _draw_menu_overlay(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((8, 10, 18, 220))
+        self.screen.blit(overlay, (0, 0))
+
+        menu_width = 880
+        menu_height = 520
+        menu_x = SCREEN_WIDTH // 2 - menu_width // 2
+        menu_y = SCREEN_HEIGHT // 2 - menu_height // 2
+        panel_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)
+        pygame.draw.rect(self.screen, (24, 28, 40), panel_rect, border_radius=12)
+        pygame.draw.rect(self.screen, (90, 124, 168), panel_rect, 2, border_radius=12)
+
+        header = self.font_large.render("Adventurer's Journal", True, YELLOW)
+        self.screen.blit(header, (menu_x + 28, menu_y + 24))
+        subtitle = self.font_small.render("Quick access to items, attacks, bestiary, maps, and quests.", True, (176, 190, 215))
+        self.screen.blit(subtitle, (menu_x + 28, menu_y + 68))
+
+        tab_y = menu_y + 110
+        tab_x = menu_x + 24
+        tab_width = (menu_width - 48 - 16) // len(self.menu_tabs)
+        tab_height = 54
+        for index, tab_label in enumerate(self.menu_tabs):
+            button_rect = pygame.Rect(tab_x + index * (tab_width + 4), tab_y, tab_width, tab_height)
+            selected = index == self.menu_tab_index
+            pygame.draw.rect(self.screen, (34, 44, 70) if selected else (22, 28, 44), button_rect, border_radius=14)
+            pygame.draw.rect(self.screen, (120, 190, 255) if selected else (84, 108, 150), button_rect, 2, border_radius=14)
+            if selected:
+                glow_rect = button_rect.inflate(4, 4)
+                pygame.draw.rect(self.screen, (80, 160, 255, 48), glow_rect, border_radius=16)
+            label_surface = self.font_small.render(tab_label, True, (204, 232, 255) if selected else (210, 220, 240))
+            label_x = button_rect.x + 18
+            label_y = button_rect.y + (tab_height - label_surface.get_height()) // 2
+            self.screen.blit(label_surface, (label_x, label_y))
+
+        content_rect = pygame.Rect(menu_x + 24, tab_y + tab_height + 20, menu_width - 48, menu_height - (tab_y + tab_height + 20 - menu_y) - 28)
+        pygame.draw.rect(self.screen, (18, 22, 36), content_rect, border_radius=14)
+        pygame.draw.rect(self.screen, (94, 138, 190), content_rect, 2, border_radius=14)
+
+        page_title = self.font_large.render(self.menu_tabs[self.menu_tab_index], True, YELLOW)
+        self.screen.blit(page_title, (content_rect.x + 22, content_rect.y + 18))
+        page_hint = self.font_small.render("Primary sections above, details below.", True, (170, 190, 215))
+        self.screen.blit(page_hint, (content_rect.x + 22, content_rect.y + 54))
+
+        if self.menu_tab_index == 0:
+            self._draw_inventory_overlay(content_rect)
+        elif self.menu_tab_index == 1:
+            self._draw_attacks_overlay(content_rect)
+        elif self.menu_tab_index == 2:
+            self._draw_bestiary_overlay(content_rect)
+        elif self.menu_tab_index == 3:
+            self._draw_maps_overlay(content_rect)
+        elif self.menu_tab_index == 4:
+            self._draw_quest_log_overlay(content_rect)
+
+        tabs_hint = self.font_small.render("TAB or 1-5 to switch sections, Esc to close", True, (170, 190, 215))
+        self.screen.blit(tabs_hint, (menu_x + menu_width // 2 - tabs_hint.get_width() // 2, menu_y + menu_height - 34))
+
+    def _handle_attacks_menu_input(self, event):
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.selected_attack = max(0, self.selected_attack - 1)
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+            if self.player and self.player.attack_ids:
+                self.selected_attack = min(len(self.player.attack_ids) - 1, self.selected_attack + 1)
+
+    def _draw_attacks_overlay(self, content_rect: pygame.Rect | None = None):
+        if content_rect is None:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 185))
+            self.screen.blit(overlay, (0, 0))
+            box_width = 860
+            box_height = 520
+            box_x = SCREEN_WIDTH // 2 - box_width // 2
+            box_y = SCREEN_HEIGHT // 2 - box_height // 2
+            content_rect = pygame.Rect(box_x + 24, box_y + 70, box_width - 48, box_height - 104)
+            title_x = box_x + 24
+            title_y = box_y + 20
+        else:
+            pygame.draw.rect(self.screen, (18, 22, 34), content_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (140, 144, 168), content_rect, 2, border_radius=8)
+            title_x = content_rect.x + 4
+            title_y = content_rect.y - 18
+
+        title = self.font_large.render("Attacks", True, YELLOW)
+        self.screen.blit(title, (title_x, title_y))
+        subtitle = self.font_small.render("Review your equipped moves and cooldown status.", True, GRAY)
+        self.screen.blit(subtitle, (title_x, title_y + 44))
+
+        left_rect = pygame.Rect(content_rect.x + 12, content_rect.y + 64, int(content_rect.width * 0.42), content_rect.height - 90)
+        right_rect = pygame.Rect(left_rect.right + 18, left_rect.y, content_rect.width - left_rect.width - 30, left_rect.height)
+        pygame.draw.rect(self.screen, (22, 26, 38), left_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (22, 26, 38), right_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), left_rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), right_rect, 2, border_radius=8)
+
+        attack_ids = self.player.attack_ids if self.player else []
+        self.selected_attack = max(0, min(self.selected_attack, len(attack_ids) - 1)) if attack_ids else 0
+        row_height = 36
+        start_y = left_rect.y + 12
+        if attack_ids:
+            for i, attack_id in enumerate(attack_ids[:12]):
+                selected = i == (self.selected_attack % 12)
+                row_rect = pygame.Rect(left_rect.x + 8, start_y + i * (row_height + 6), left_rect.width - 16, row_height)
+                pygame.draw.rect(self.screen, (60, 66, 90) if selected else (38, 42, 56), row_rect, border_radius=8)
+                pygame.draw.rect(self.screen, YELLOW if selected else (92, 98, 122), row_rect, 2, border_radius=8)
+                attack_data = attacks.get(attack_id, {})
+                name = attack_data.get("name", attack_id)
+                cooldown = self.player.cooldowns.get(attack_id, 0) if self.player else 0
+                status_text = "Ready" if cooldown == 0 else f"CD {cooldown}"
+                line = self.font_small.render(f"{i+1}. {name} — {status_text}", True, WHITE if selected else (220, 224, 236))
+                self.screen.blit(line, (row_rect.x + 12, row_rect.y + 8))
+        else:
+            none_text = self.font_small.render("No attacks equipped.", True, GRAY)
+            self.screen.blit(none_text, (left_rect.x + 14, left_rect.y + 14))
+
+        if attack_ids:
+            attack_id = attack_ids[self.selected_attack]
+            attack_data = attacks.get(attack_id, {})
+            detail_title = self.font_large.render(attack_data.get("name", attack_id), True, YELLOW)
+            self.screen.blit(detail_title, (right_rect.x + 16, right_rect.y + 16))
+            meta_lines = [
+                f"Type: {attack_data.get('damage_type', 'Unknown').title()}",
+                f"Base Damage: {attack_data.get('base_damage', 0)}",
+                f"Range: {attack_data.get('range', 1)}",
+                f"Cooldown: {attack_data.get('cooldown', 0)}",
+            ]
+            detail_y = right_rect.y + 60
+            for line_text in meta_lines:
+                line = self.font_small.render(line_text, True, WHITE)
+                self.screen.blit(line, (right_rect.x + 16, detail_y))
+                detail_y += 28
+            description = attack_data.get("description", "No description available.")
+            desc_title = self.font_small.render("Details", True, YELLOW)
+            self.screen.blit(desc_title, (right_rect.x + 16, detail_y + 8))
+            desc_y = detail_y + 34
+            for line_text in self._wrap_text_lines(self.font_small, description, right_rect.width - 32)[:7]:
+                desc_line = self.font_small.render(line_text, True, WHITE)
+                self.screen.blit(desc_line, (right_rect.x + 16, desc_y))
+                desc_y += self.font_small.get_linesize()
+
+        hint_text = self.font_small.render("W/S to highlight, 1-5 to switch sections, Esc to close.", True, GRAY)
+        self.screen.blit(hint_text, (content_rect.x + 14, content_rect.bottom - 24))
 
     def _handle_quest_log_input(self, event):
         quest_ids = sorted(self.accepted_quests)
@@ -3521,6 +3846,7 @@ class Game:
 
     def _close_inventory(self):
         self.show_inventory = False
+        self.show_menu = False
         self.inventory_selection = 0
 
     def _handle_inventory_input(self, event):
@@ -3566,147 +3892,124 @@ class Game:
             else:
                 self.inventory_selection = 0
 
-    def _draw_inventory_overlay(self):
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 185))
-        self.screen.blit(overlay, (0, 0))
+    def _draw_inventory_overlay(self, content_rect: pygame.Rect | None = None):
+        if content_rect is None:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 185))
+            self.screen.blit(overlay, (0, 0))
+            box_width = 860
+            box_height = 520
+            box_x = SCREEN_WIDTH // 2 - box_width // 2
+            box_y = SCREEN_HEIGHT // 2 - box_height // 2
+            pygame.draw.rect(self.screen, (30, 32, 48), (box_x, box_y, box_width, box_height))
+            pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+            content_rect = pygame.Rect(box_x + 24, box_y + 70, box_width - 48, box_height - 104)
+            title_x = box_x + 24
+            title_y = box_y + 20
+        else:
+            pygame.draw.rect(self.screen, (18, 22, 34), content_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (140, 144, 168), content_rect, 2, border_radius=8)
+            title_x = content_rect.x + 4
+            title_y = content_rect.y - 18
 
-        box_width = 860
-        box_height = 520
-        box_x = SCREEN_WIDTH // 2 - box_width // 2
-        box_y = SCREEN_HEIGHT // 2 - box_height // 2
-        pygame.draw.rect(self.screen, (30, 32, 48), (box_x, box_y, box_width, box_height))
-        pygame.draw.rect(self.screen, WHITE, (box_x, box_y, box_width, box_height), 3)
+        title = self.font_large.render("Items", True, YELLOW)
+        self.screen.blit(title, (title_x, title_y))
 
-        title = self.font_large.render("Inventory", True, YELLOW)
-        self.screen.blit(title, (box_x + 24, box_y + 20))
+        left_rect = pygame.Rect(content_rect.x + 12, content_rect.y + 48, int(content_rect.width * 0.42), content_rect.height - 72)
+        right_rect = pygame.Rect(left_rect.right + 18, content_rect.y + 48, content_rect.width - left_rect.width - 30, content_rect.height - 72)
+        pygame.draw.rect(self.screen, (22, 26, 38), left_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (22, 26, 38), right_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), left_rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), right_rect, 2, border_radius=8)
 
         inventory_ids = self._inventory_item_ids()
-        left_x = box_x + 24
-        start_y = box_y + 70
-        row_height = 34
+        row_height = 32
+        start_y = left_rect.y + 12
         if inventory_ids:
-            for i, item_id in enumerate(inventory_ids[:10]):
+            visible_ids = inventory_ids[:12]
+            for i, item_id in enumerate(visible_ids):
                 item_data = items[item_id]
-                rarity_color = get_item_rarity_color(item_data)
                 selected = i == self.inventory_selection
-                color = YELLOW if selected else rarity_color
+                list_color = YELLOW if selected else get_item_rarity_color(item_data)
+                prefix = "» " if selected else "  "
                 slot_name = self._equipment_slot_for_item(item_id)
                 suffix = f" [{slot_name}]" if slot_name else ""
-                prefix = ">> " if selected else ""
-                item_text = self.font_small.render(f"{prefix}{item_data['name']} x{self.inventory[item_id]}{suffix}", True, color)
-                self.screen.blit(item_text, (left_x, start_y + i * row_height))
+                item_text = self.font_small.render(f"{prefix}{item_data['name']}{suffix}", True, list_color)
+                self.screen.blit(item_text, (left_rect.x + 14, start_y + i * row_height))
+        else:
+            empty_text = self.font_small.render("No items in your pack.", True, GRAY)
+            self.screen.blit(empty_text, (left_rect.x + 14, start_y))
 
-            selected_item = inventory_ids[self.inventory_selection]
+        selected_item = inventory_ids[self.inventory_selection] if inventory_ids else None
+        if selected_item:
             selected_data = items[selected_item]
             selected_color = get_item_rarity_color(selected_data)
-            detail_x = box_x + 430
-            detail_title = self.font_small.render(selected_data['name'], True, selected_color)
-            self.screen.blit(detail_title, (detail_x, start_y))
-            detail_desc = self.font_small.render(selected_data.get('description', ''), True, WHITE)
-            self.screen.blit(detail_desc, (detail_x, start_y + 36))
-            detail_type = self.font_small.render(f"Type: {selected_data.get('effect_type', 'unknown')}", True, WHITE)
-            self.screen.blit(detail_type, (detail_x, start_y + 72))
-            detail_value = self.font_small.render(f"Value: {selected_data.get('value', 0)}", True, WHITE)
-            self.screen.blit(detail_value, (detail_x, start_y + 102))
-            detail_rarity = self.font_small.render(f"Tier: {selected_data.get('rarity', 'common')}", True, selected_color)
-            self.screen.blit(detail_rarity, (detail_x, start_y + 132))
+            detail_x = right_rect.x + 16
+            detail_y = right_rect.y + 16
+            detail_title = self.font_large.render(selected_data['name'], True, selected_color)
+            self.screen.blit(detail_title, (detail_x, detail_y))
+            self.screen.blit(self.font_small.render(selected_data.get('description', ''), True, WHITE), (detail_x, detail_y + 42))
+            self.screen.blit(self.font_small.render(f"Type: {selected_data.get('effect_type', 'unknown')}", True, WHITE), (detail_x, detail_y + 78))
+            self.screen.blit(self.font_small.render(f"Value: {selected_data.get('value', 0)}", True, WHITE), (detail_x, detail_y + 108))
+            self.screen.blit(self.font_small.render(f"Tier: {selected_data.get('rarity', 'common')}", True, selected_color), (detail_x, detail_y + 138))
+
+        equipment_y = content_rect.y + content_rect.height - 56
+        equipment_text = self.font_small.render("Equipped: [H] Helmet  [A] Armor  [X] Accessory  [R] Relic", True, GRAY)
+        self.screen.blit(equipment_text, (content_rect.x + 14, equipment_y))
+
+        hint_text = self.font_small.render("Use W/S to browse, Enter to use/equip, Esc to close.", True, GRAY)
+        self.screen.blit(hint_text, (content_rect.x + 14, content_rect.y + content_rect.height - 26))
+
+    def _draw_bestiary_overlay(self, content_rect: pygame.Rect | None = None):
+        if content_rect is None:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 182))
+            self.screen.blit(overlay, (0, 0))
+            box_width = 860
+            box_height = 540
+            box_x = SCREEN_WIDTH // 2 - box_width // 2
+            box_y = SCREEN_HEIGHT // 2 - box_height // 2
+            content_rect = pygame.Rect(box_x + 24, box_y + 80, box_width - 48, box_height - 108)
+            title_x = box_x + 24
+            title_y = box_y + 20
         else:
-            empty_text = self.font_small.render("No items in inventory.", True, WHITE)
-            self.screen.blit(empty_text, (left_x, start_y))
+            pygame.draw.rect(self.screen, (18, 22, 34), content_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (140, 144, 168), content_rect, 2, border_radius=8)
+            title_x = content_rect.x + 4
+            title_y = content_rect.y - 18
 
-        equipment_y = box_y + box_height - 180
-        equipment_title = self.font_small.render("Equipped", True, YELLOW)
-        self.screen.blit(equipment_title, (left_x, equipment_y))
-        slot_rows = [
-            f"Helmet: {items[self.equipment_slots['helmet']]['name'] if self.equipment_slots['helmet'] else 'Empty'}",
-            f"Armor: {items[self.equipment_slots['armor']]['name'] if self.equipment_slots['armor'] else 'Empty'}",
-            f"Accessory: {items[self.equipment_slots['accessory']]['name'] if self.equipment_slots['accessory'] else 'Empty'}",
-            f"Relic: {items[self.equipment_slots['relic']]['name'] if self.equipment_slots['relic'] else 'Empty'}",
-        ]
-        for i, row in enumerate(slot_rows):
-            row_text = self.font_small.render(row, True, WHITE)
-            self.screen.blit(row_text, (left_x, equipment_y + 30 + i * 26))
+        title = self.font_large.render("Bestiary", True, YELLOW)
+        self.screen.blit(title, (title_x, title_y))
+        subtitle = self.font_small.render("Know the foes you have faced.", True, GRAY)
+        self.screen.blit(subtitle, (title_x, title_y + 44))
 
-        hint_text = self.font_small.render("I/Esc close, Up/Down move, Enter/Space to use item, Click 1-4 to unequip slots", True, GRAY)
-        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 46))
+        left_rect = pygame.Rect(content_rect.x + 12, content_rect.y + 64, int(content_rect.width * 0.38), content_rect.height - 90)
+        right_rect = pygame.Rect(left_rect.right + 18, left_rect.y, content_rect.width - left_rect.width - 30, left_rect.height)
+        pygame.draw.rect(self.screen, (22, 26, 40), left_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (22, 26, 40), right_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), left_rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), right_rect, 2, border_radius=8)
 
-    def _draw_bestiary_overlay(self):
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 182))
-        self.screen.blit(overlay, (0, 0))
-
-        box_width = 860
-        box_height = 540
-        box_x = SCREEN_WIDTH // 2 - box_width // 2
-        box_y = SCREEN_HEIGHT // 2 - box_height // 2
-        shadow_rect = pygame.Rect(box_x + 8, box_y + 8, box_width, box_height)
-        shadow = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
-        shadow.fill((0, 0, 0, 0))
-        pygame.draw.rect(shadow, (0, 0, 0, 80), shadow.get_rect(), border_radius=6)
-        self.screen.blit(shadow, shadow_rect.topleft)
-        panel_rect = pygame.Rect(box_x, box_y, box_width, box_height)
-        pygame.draw.rect(self.screen, (34, 36, 56), panel_rect, border_radius=4)
-        pygame.draw.rect(self.screen, (236, 238, 246), panel_rect, 3, border_radius=4)
-
-        title = self.font_large.render(f"{self._current_bestiary_title()}'s Bestiary", True, YELLOW)
-        self.screen.blit(title, (box_x + 24, box_y + 20))
-
-        if self.player:
-            total_defeated = self.player.enemy_defeats
-            summary = self.font_small.render(
-                f"Level {self.player.level}  |  Total Defeated: {total_defeated}",
-                True,
-                WHITE,
-            )
-            self.screen.blit(summary, (box_x + 24, box_y + 62))
-
-            next_rank = self._next_bestiary_rank()
-            if next_rank:
-                _, next_title, next_threshold = next_rank
-                progress_text = self.font_small.render(
-                    f"Next Rank: {next_title} at {next_threshold} defeats",
-                    True,
-                    GRAY,
-                )
-            else:
-                progress_text = self.font_small.render("Final Rank reached.", True, GRAY)
-            self.screen.blit(progress_text, (box_x + 24, box_y + 90))
-
-        list_x = box_x + 24
-        list_y = box_y + 136
-        list_width = 300
-        list_height = 330
-        detail_x = list_x + list_width + 24
-        detail_width = box_width - (detail_x - box_x) - 24
-        row_height = 54
-        page_size = 5
+        row_height = 52
+        page_size = max(1, (left_rect.height - 16) // (row_height + 8))
         page_start = self.bestiary_page * page_size
         page_entries = self.enemy_data[page_start:page_start + page_size]
-
-        list_rect = pygame.Rect(list_x, list_y, list_width, list_height)
-        detail_rect = pygame.Rect(detail_x, list_y, detail_width, list_height)
-        pygame.draw.rect(self.screen, (28, 30, 46), list_rect)
-        pygame.draw.rect(self.screen, (124, 126, 160), list_rect, 2)
-        pygame.draw.rect(self.screen, (28, 30, 46), detail_rect)
-        pygame.draw.rect(self.screen, (124, 126, 160), detail_rect, 2)
+        list_y = left_rect.y + 8
 
         for page_offset, enemy in enumerate(page_entries):
             enemy_index = page_start + page_offset
             enemy_id = enemy.get("id", f"enemy_{enemy_index}")
             seen = enemy_id in self.bestiary_seen
             selected = enemy_index == self.bestiary_selection
-            row_rect = pygame.Rect(list_x + 8, list_y + 8 + page_offset * (row_height + 8), list_width - 16, row_height)
-            row_fill = (71, 78, 112) if selected else (42, 44, 61)
-            pygame.draw.rect(self.screen, row_fill, row_rect, border_radius=2)
-            pygame.draw.rect(self.screen, (255, 246, 78) if selected else (99, 102, 130), row_rect, 2, border_radius=2)
+            row_rect = pygame.Rect(left_rect.x + 8, list_y + page_offset * (row_height + 8), left_rect.width - 16, row_height)
+            pygame.draw.rect(self.screen, (60, 66, 90) if selected else (38, 42, 56), row_rect, border_radius=8)
+            pygame.draw.rect(self.screen, YELLOW if selected else (92, 98, 122), row_rect, 2, border_radius=8)
             enemy_name = enemy.get("name", "Unknown") if seen else "???"
             type_label = "/".join(parse_type_list(enemy.get("types"))) if seen else "???"
-            wrapped_name = self._wrap_text_lines(self.font_small, enemy_name, row_rect.width - 20)
-            name_surface = self.font_small.render(wrapped_name[0] if wrapped_name else enemy_name, True, WHITE if selected else (228, 230, 238))
-            type_surface = self.font_small.render(type_label, True, (255, 230, 118) if seen else GRAY)
-            self.screen.blit(name_surface, (row_rect.x + 10, row_rect.y + 8))
-            self.screen.blit(type_surface, (row_rect.x + 10, row_rect.y + 28))
+            name_surface = self.font_small.render(enemy_name, True, WHITE if selected else (220, 224, 236))
+            type_surface = self.font_small.render(type_label, True, GRAY if seen else (114, 122, 138))
+            self.screen.blit(name_surface, (row_rect.x + 12, row_rect.y + 10))
+            self.screen.blit(type_surface, (row_rect.x + 12, row_rect.y + 30))
 
         selected_enemy = self.enemy_data[self.bestiary_selection] if self.enemy_data else None
         if selected_enemy:
@@ -3722,86 +4025,82 @@ class Game:
             display_types = parse_type_list(selected_enemy.get("types")) if seen else []
 
             detail_title = self.font_large.render(name_text, True, YELLOW if seen else GRAY)
-            self.screen.blit(detail_title, (detail_x + 16, list_y + 16))
-            badge_x = detail_x + 16
-            badge_y = list_y + 52
+            self.screen.blit(detail_title, (right_rect.x + 16, right_rect.y + 16))
+            badge_x = right_rect.x + 16
+            badge_y = right_rect.y + 58
             if display_types:
                 for type_name in display_types:
-                    label = type_name.title()
-                    badge_surface = self.font_small.render(label, True, WHITE)
-                    badge_width = badge_surface.get_width() + 18
+                    badge_surface = self.font_small.render(type_name.title(), True, WHITE)
+                    badge_width = badge_surface.get_width() + 16
                     badge_rect = pygame.Rect(badge_x, badge_y, badge_width, 24)
-                    pygame.draw.rect(self.screen, type_badge_color(type_name), badge_rect, border_radius=12)
-                    pygame.draw.rect(self.screen, (245, 246, 252), badge_rect, 1, border_radius=12)
-                    self.screen.blit(badge_surface, (badge_x + 9, badge_y + 3))
+                    pygame.draw.rect(self.screen, type_badge_color(type_name), badge_rect, border_radius=10)
+                    self.screen.blit(badge_surface, (badge_x + 8, badge_y + 3))
                     badge_x += badge_width + 8
             else:
-                unknown_badge = self.font_small.render("Unknown Type", True, GRAY)
-                self.screen.blit(unknown_badge, (badge_x, badge_y + 2))
+                unknown_badge = self.font_small.render("Unknown", True, GRAY)
+                self.screen.blit(unknown_badge, (badge_x, badge_y + 3))
 
-            divider_y = list_y + 92
-            pygame.draw.line(self.screen, (94, 97, 126), (detail_x + 16, divider_y), (detail_x + detail_width - 16, divider_y), 1)
-            stat_lines = [
+            info_y = badge_y + 36
+            for line in [
                 f"HP: {hp_text}",
                 f"Moves: {attack_count}",
                 f"Defeated: {defeats}",
-                f"Elite Seen: {'Yes' if elite_seen and seen else 'No' if seen else '???'}",
-                f"Elite Defeats: {elite_defeats if seen else '???'}",
-            ]
-            stat_y = divider_y + 14
-            for line in stat_lines:
-                stat_surface = self.font_small.render(line, True, WHITE if seen else GRAY)
-                self.screen.blit(stat_surface, (detail_x + 16, stat_y))
-                stat_y += 28
+                f"Elite: {'Yes' if elite_seen and seen else 'No' if seen else '???'}",
+                f"Elite Wins: {elite_defeats if seen else '???'}",
+            ]:
+                line_surface = self.font_small.render(line, True, WHITE if seen else GRAY)
+                self.screen.blit(line_surface, (right_rect.x + 16, info_y))
+                info_y += 26
 
-            desc_title = self.font_small.render("Description", True, YELLOW if seen else GRAY)
-            self.screen.blit(desc_title, (detail_x + 16, stat_y + 8))
-            wrapped_lines = self._wrap_text_lines(self.font_small, description, detail_width - 32)
-            desc_y = stat_y + 38
-            for line in wrapped_lines[:7]:
+            desc_title = self.font_small.render("Lore", True, YELLOW if seen else GRAY)
+            self.screen.blit(desc_title, (right_rect.x + 16, info_y + 12))
+            desc_y = info_y + 36
+            for line in self._wrap_text_lines(self.font_small, description, right_rect.width - 32)[:6]:
                 desc_surface = self.font_small.render(line, True, WHITE if seen else GRAY)
-                self.screen.blit(desc_surface, (detail_x + 16, desc_y))
+                self.screen.blit(desc_surface, (right_rect.x + 16, desc_y))
                 desc_y += self.font_small.get_linesize()
 
-        max_page = max(0, (len(self.enemy_data) - 1) // page_size) if self.enemy_data else 0
-        page_text = self.font_small.render(f"Page {self.bestiary_page + 1}/{max_page + 1}", True, WHITE)
-        self.screen.blit(page_text, (list_x, box_y + box_height - 70))
-        hint_text = self.font_small.render("W/S select  A/D or Q/E page  B/Esc close", True, GRAY)
-        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 42))
+        page_count = max(1, (len(self.enemy_data) - 1) // page_size + 1)
+        page_text = self.font_small.render(f"Page {self.bestiary_page + 1}/{page_count}", True, WHITE)
+        self.screen.blit(page_text, (left_rect.x + 10, left_rect.bottom + 10))
+        hint_text = self.font_small.render("W/S select, A/D page, Esc to close", True, GRAY)
+        self.screen.blit(hint_text, (content_rect.x + 12, content_rect.bottom - 24))
 
-    def _draw_quest_log_overlay(self):
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 182))
-        self.screen.blit(overlay, (0, 0))
+    def _draw_quest_log_overlay(self, content_rect: pygame.Rect | None = None):
+        if content_rect is None:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 185))
+            self.screen.blit(overlay, (0, 0))
+            box_width = 860
+            box_height = 520
+            box_x = SCREEN_WIDTH // 2 - box_width // 2
+            box_y = SCREEN_HEIGHT // 2 - box_height // 2
+            content_rect = pygame.Rect(box_x + 24, box_y + 70, box_width - 48, box_height - 104)
+            title_x = box_x + 24
+            title_y = box_y + 20
+        else:
+            pygame.draw.rect(self.screen, (18, 22, 34), content_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (140, 144, 168), content_rect, 2, border_radius=8)
+            title_x = content_rect.x + 4
+            title_y = content_rect.y - 18
 
-        box_width = 820
-        box_height = 500
-        box_x = SCREEN_WIDTH // 2 - box_width // 2
-        box_y = SCREEN_HEIGHT // 2 - box_height // 2
-        panel_rect = pygame.Rect(box_x, box_y, box_width, box_height)
-        pygame.draw.rect(self.screen, (31, 34, 50), panel_rect, border_radius=4)
-        pygame.draw.rect(self.screen, (236, 238, 246), panel_rect, 3, border_radius=4)
+        title = self.font_large.render("Quests", True, YELLOW)
+        self.screen.blit(title, (title_x, title_y))
+        subtitle = self.font_small.render("Track active objectives and story progress.", True, GRAY)
+        self.screen.blit(subtitle, (title_x, title_y + 44))
 
-        title = self.font_large.render("Quest Journal", True, YELLOW)
-        self.screen.blit(title, (box_x + 24, box_y + 20))
+        left_rect = pygame.Rect(content_rect.x + 12, content_rect.y + 64, int(content_rect.width * 0.38), content_rect.height - 90)
+        right_rect = pygame.Rect(left_rect.right + 18, left_rect.y, content_rect.width - left_rect.width - 30, left_rect.height)
+        pygame.draw.rect(self.screen, (22, 26, 38), left_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (22, 26, 38), right_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), left_rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), right_rect, 2, border_radius=8)
 
         quest_ids = sorted(self.accepted_quests)
         catalog = self._quest_catalog()
-        list_x = box_x + 24
-        list_y = box_y + 78
-        list_width = 300
-        detail_x = list_x + list_width + 24
-        detail_width = box_width - (detail_x - box_x) - 24
-        list_rect = pygame.Rect(list_x, list_y, list_width, 330)
-        detail_rect = pygame.Rect(detail_x, list_y, detail_width, 330)
-        pygame.draw.rect(self.screen, (25, 28, 42), list_rect)
-        pygame.draw.rect(self.screen, (124, 126, 160), list_rect, 2)
-        pygame.draw.rect(self.screen, (25, 28, 42), detail_rect)
-        pygame.draw.rect(self.screen, (124, 126, 160), detail_rect, 2)
-
         if not quest_ids:
             empty_text = self.font_small.render("No active quests yet.", True, WHITE)
-            self.screen.blit(empty_text, (list_x + 14, list_y + 16))
+            self.screen.blit(empty_text, (left_rect.x + 14, left_rect.y + 14))
         else:
             self.quest_log_selection = min(self.quest_log_selection, len(quest_ids) - 1)
             row_height = 42
@@ -3811,46 +4110,91 @@ class Game:
                 index = visible_start + row_index
                 quest_data = catalog.get(quest_id, {"name": quest_id})
                 selected = index == self.quest_log_selection
-                row_rect = pygame.Rect(list_x + 8, list_y + 8 + row_index * (row_height + 6), list_width - 16, row_height)
-                pygame.draw.rect(self.screen, (73, 78, 112) if selected else (42, 45, 62), row_rect, border_radius=2)
-                pygame.draw.rect(self.screen, YELLOW if selected else (99, 102, 130), row_rect, 2, border_radius=2)
+                row_rect = pygame.Rect(left_rect.x + 8, left_rect.y + 8 + row_index * (row_height + 6), left_rect.width - 16, row_height)
+                pygame.draw.rect(self.screen, (60, 66, 90) if selected else (38, 42, 56), row_rect, border_radius=8)
+                pygame.draw.rect(self.screen, YELLOW if selected else (92, 98, 122), row_rect, 2, border_radius=8)
                 prefix = ">> " if selected else ""
                 name_text = self.font_small.render(prefix + quest_data.get("name", quest_id), True, WHITE)
-                self.screen.blit(name_text, (row_rect.x + 10, row_rect.y + 11))
+                self.screen.blit(name_text, (row_rect.x + 12, row_rect.y + 11))
 
             selected_id = quest_ids[self.quest_log_selection]
             selected = catalog.get(selected_id, {"name": selected_id, "description": "No quest notes yet.", "faction": {}, "giver": "Unknown"})
             detail_title = self.font_large.render(selected.get("name", selected_id), True, YELLOW)
-            self.screen.blit(detail_title, (detail_x + 16, list_y + 16))
-            giver_text = self.font_small.render(f"Giver: {selected.get('giver', 'Unknown')}", True, GRAY)
-            self.screen.blit(giver_text, (detail_x + 16, list_y + 56))
-
-            desc_y = list_y + 96
-            for line in self._wrap_text_lines(self.font_small, selected.get("description", "No quest notes yet."), detail_width - 32)[:6]:
+            self.screen.blit(detail_title, (right_rect.x + 16, right_rect.y + 16))
+            self.screen.blit(self.font_small.render(f"Giver: {selected.get('giver', 'Unknown')}", True, WHITE), (right_rect.x + 16, right_rect.y + 54))
+            status_text = selected.get("status", "In progress")
+            self.screen.blit(self.font_small.render(f"Status: {status_text}", True, WHITE), (right_rect.x + 16, right_rect.y + 80))
+            desc_y = right_rect.y + 112
+            for line in self._wrap_text_lines(self.font_small, selected.get("description", "No quest notes yet."), right_rect.width - 32)[:7]:
                 desc_text = self.font_small.render(line, True, WHITE)
-                self.screen.blit(desc_text, (detail_x + 16, desc_y))
+                self.screen.blit(desc_text, (right_rect.x + 16, desc_y))
                 desc_y += self.font_small.get_linesize()
 
-            faction_changes = selected.get("faction", {})
-            faction_title = self.font_small.render("Faction impact", True, YELLOW)
-            self.screen.blit(faction_title, (detail_x + 16, list_y + 238))
-            faction_y = list_y + 268
-            if isinstance(faction_changes, dict) and faction_changes:
-                for faction_id, amount in faction_changes.items():
-                    faction_name = FACTIONS.get(faction_id, {}).get("name", faction_id)
-                    amount_int = int(amount)
-                    color = FACTIONS.get(faction_id, {}).get("color", WHITE) if amount_int >= 0 else (210, 92, 92)
-                    line = self.font_small.render(f"{faction_name}: {amount_int:+d}", True, color)
-                    self.screen.blit(line, (detail_x + 16, faction_y))
-                    faction_y += 24
-            else:
-                none_text = self.font_small.render("None recorded.", True, GRAY)
-                self.screen.blit(none_text, (detail_x + 16, faction_y))
+        hint_text = self.font_small.render("W/S to browse, Esc to close.", True, GRAY)
+        self.screen.blit(hint_text, (content_rect.x + 14, content_rect.bottom - 24))
 
-        count_text = self.font_small.render(f"Active quests: {len(quest_ids)}", True, WHITE)
-        self.screen.blit(count_text, (box_x + 24, box_y + box_height - 70))
-        hint_text = self.font_small.render("J/Esc close  W/S select", True, GRAY)
-        self.screen.blit(hint_text, (box_x + 24, box_y + box_height - 42))
+    def _draw_maps_overlay(self, content_rect: pygame.Rect | None = None):
+        if content_rect is None:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 185))
+            self.screen.blit(overlay, (0, 0))
+            box_width = 860
+            box_height = 520
+            box_x = SCREEN_WIDTH // 2 - box_width // 2
+            box_y = SCREEN_HEIGHT // 2 - box_height // 2
+            content_rect = pygame.Rect(box_x + 24, box_y + 70, box_width - 48, box_height - 104)
+            title_x = box_x + 24
+            title_y = box_y + 20
+        else:
+            pygame.draw.rect(self.screen, (18, 22, 34), content_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (140, 144, 168), content_rect, 2, border_radius=8)
+            title_x = content_rect.x + 4
+            title_y = content_rect.y - 18
+
+        title = self.font_large.render("Maps", True, YELLOW)
+        self.screen.blit(title, (title_x, title_y))
+        subtitle = self.font_small.render("See your current location and nearby destinations.", True, GRAY)
+        self.screen.blit(subtitle, (title_x, title_y + 44))
+
+        left_rect = pygame.Rect(content_rect.x + 12, content_rect.y + 64, int(content_rect.width * 0.38), content_rect.height - 90)
+        right_rect = pygame.Rect(left_rect.right + 18, left_rect.y, content_rect.width - left_rect.width - 30, left_rect.height)
+        pygame.draw.rect(self.screen, (22, 26, 38), left_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (22, 26, 38), right_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), left_rect, 2, border_radius=8)
+        pygame.draw.rect(self.screen, (108, 112, 134), right_rect, 2, border_radius=8)
+
+        current_map = self._current_map_info()
+        map_names = [map_info.get("name", f"Map {idx + 1}") for idx, map_info in enumerate(self.map_data)] if self.map_data else []
+        row_height = 38
+        for i, map_name in enumerate(map_names[:11]):
+            current = i == self.current_map_index
+            row_rect = pygame.Rect(left_rect.x + 8, left_rect.y + 12 + i * (row_height + 6), left_rect.width - 16, row_height)
+            pygame.draw.rect(self.screen, (60, 66, 90) if current else (38, 42, 56), row_rect, border_radius=8)
+            pygame.draw.rect(self.screen, YELLOW if current else (92, 98, 122), row_rect, 2, border_radius=8)
+            label = self.font_small.render(f"{i + 1}. {map_name}", True, WHITE)
+            self.screen.blit(label, (row_rect.x + 12, row_rect.y + 10))
+
+        if current_map:
+            detail_title = self.font_large.render(current_map.get("name", "Unknown Location"), True, YELLOW)
+            self.screen.blit(detail_title, (right_rect.x + 16, right_rect.y + 16))
+            self.screen.blit(self.font_small.render(f"Terrain: {current_map.get('terrain', 'Unknown').title()}", True, WHITE), (right_rect.x + 16, right_rect.y + 58))
+            safe_zone = current_map.get("safe_zone", False)
+            self.screen.blit(self.font_small.render(f"Safe Zone: {'Yes' if safe_zone else 'No'}", True, WHITE), (right_rect.x + 16, right_rect.y + 84))
+            desc_y = right_rect.y + 116
+            for line in self._wrap_text_lines(self.font_small, current_map.get("description", "No details available."), right_rect.width - 32)[:6]:
+                self.screen.blit(self.font_small.render(line, True, WHITE), (right_rect.x + 16, desc_y))
+                desc_y += self.font_small.get_linesize()
+            connections = current_map.get("connections", {})
+            if connections:
+                self.screen.blit(self.font_small.render("Nearby exits:", True, YELLOW), (right_rect.x + 16, desc_y + 10))
+                exit_y = desc_y + 34
+                for direction, connection in connections.items():
+                    target_name = connection.get("target_map_id", "?")
+                    self.screen.blit(self.font_small.render(f"{direction.title()}: {target_name}", True, WHITE), (right_rect.x + 16, exit_y))
+                    exit_y += 24
+
+        hint_text = self.font_small.render("Use 1-5 to switch sections, Esc to close.", True, GRAY)
+        self.screen.blit(hint_text, (content_rect.x + 14, content_rect.bottom - 24))
 
     def _add_item_to_inventory(self, item_id: str, amount: int = 1):
         if item_id not in items or amount <= 0:
@@ -4414,6 +4758,16 @@ class Game:
         damage *= self._battle_damage_multiplier(attack_types, attacker, target)
         if is_player_turn and attack_id != INSTINCT_ATTACK_ID:
             damage *= self._player_memory_multiplier(attack_id)
+        
+        # Apply zone-based damage modifiers for player attacks
+        if attacker == self.player and self.current_zone:
+            is_melee = attack_data.get("damage_type", "").lower() == "physical"
+            if self.current_zone == FRONT_ZONE:
+                damage *= 1.5 if is_melee else 0.5
+            elif self.current_zone == BACK_ZONE:
+                damage *= 0.5 if is_melee else 1.5
+            # MID_ZONE uses normal damage (1.0)
+        
         if attack_data.get("self_damage", 0):
             self_hit = self._apply_guaranteed_self_damage(attacker, float(attack_data.get("self_damage", 0)))
             if self_hit > 0:
@@ -4644,6 +4998,15 @@ class Game:
                 self.player_moving = False
                 self.player_move_progress = 0.0
 
+                self._update_combat_zone()
+
+                if self.in_combat:
+                    self._update_enemy_ai()
+                    # Decrement player cooldowns
+                    for attack_id in list(self.player.cooldowns.keys()):
+                        if self.player.cooldowns[attack_id] > 0:
+                            self.player.cooldowns[attack_id] -= 1
+
                 if self._tile_type_at(self.player_grid_x, self.player_grid_y) == TERRAIN_EXIT:
                     if self._activate_map_exit(self.player_grid_x, self.player_grid_y):
                         return
@@ -4652,13 +5015,130 @@ class Game:
 
                 current_terrain = self.terrain_map[self.player_grid_y][self.player_grid_x]
                 current_map_is_safe = bool(self._current_map_info().get("safe_zone"))
-                if current_map_is_safe or current_terrain == TERRAIN_NOSPAWN:
+                if current_map_is_safe or current_terrain == TERRAIN_NOSPAWN or self.current_map_index == 0:
                     encounter_chance = 0.0
                 else:
                     encounter_chance = 0.05 if current_terrain == TERRAIN_GRASS else 0.01
 
                 if random.random() < encounter_chance:
                     self.create_random_enemy()
+    
+    def _update_combat_zone(self):
+        """Update the current combat zone based on distance to nearest enemy"""
+        if not self.enemy:
+            self.current_zone = None
+            return
+        
+        # Calculate distance in tiles
+        dx = self.player_grid_x - self.enemy_grid_x if hasattr(self.enemy, 'grid_x') else (self.player.x - self.enemy.x) / TILE_SIZE
+        dy = self.player_grid_y - self.enemy_grid_y if hasattr(self.enemy, 'grid_y') else (self.player.y - self.enemy.y) / TILE_SIZE
+        distance = math.hypot(dx, dy)
+        
+        if distance <= ZONE_DIST_FRONT_MAX:
+            self.current_zone = FRONT_ZONE
+        elif distance <= ZONE_DIST_MID_MAX:
+            self.current_zone = MID_ZONE
+        else:
+            self.current_zone = BACK_ZONE
+    
+    def _update_enemy_ai(self):
+        if not self.enemy:
+            self.in_combat = False
+            return
+        if self.enemy.stats.current_hp <= 0:
+            self._handle_enemy_defeat()
+            return
+        
+        # Decrement cooldowns
+        for attack_id in list(self.enemy.cooldowns.keys()):
+            if self.enemy.cooldowns[attack_id] > 0:
+                self.enemy.cooldowns[attack_id] -= 1
+        
+        # Simple AI: if close enough, attack; else move towards player
+        dist = math.hypot(self.player_grid_x - self.enemy_grid_x, self.player_grid_y - self.enemy_grid_y)
+        if dist <= 2:
+            # Try to attack
+            available_attacks = [attack_id for attack_id in self.enemy.attack_ids if self.enemy.cooldowns.get(attack_id, 0) == 0]
+            if available_attacks:
+                attack_id = random.choice(available_attacks)
+                self._perform_enemy_attack(attack_id)
+        else:
+            # Move towards player
+            dx = self.player_grid_x - self.enemy_grid_x
+            dy = self.player_grid_y - self.enemy_grid_y
+            new_x = self.enemy_grid_x
+            new_y = self.enemy_grid_y
+            if abs(dx) > abs(dy):
+                new_x += 1 if dx > 0 else -1
+            else:
+                new_y += 1 if dy > 0 else -1
+            if 0 <= new_x < self.map_width and 0 <= new_y < self.map_height:
+                self.enemy_grid_x = new_x
+                self.enemy_grid_y = new_y
+                self.enemy.x = self.enemy_grid_x * TILE_SIZE + TILE_SIZE // 2
+                self.enemy.y = self.enemy_grid_y * TILE_SIZE + TILE_SIZE // 2
+            self._update_combat_zone()
+    
+    def _perform_enemy_attack(self, attack_id):
+        attack_data = attacks.get(attack_id)
+        if not attack_data:
+            return
+        distance = math.hypot(self.player.x - self.enemy.x, self.player.y - self.enemy.y) / TILE_SIZE
+        if distance > attack_data.get("range", 1):
+            return
+        damage = calculate_attack_damage(self.enemy, attack_data, distance)
+        actual_damage, dodged = self.player.take_damage(damage)
+        self.enemy.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
+        self._message(f"{self.enemy.name} uses {attack_data['name']}!", 150)
+        if actual_damage > 0:
+            self._message(f"You take {actual_damage:.0f} damage!", 150)
+        if dodged:
+            self._message("You dodged the attack!", 150)
+    
+    def _handle_enemy_defeat(self):
+        self.in_combat = False
+        self.gold += self.enemy.xp_reward
+        self.player.enemy_defeats += 1
+        self._message(f"Defeated {self.enemy.name}! Gained {self.enemy.xp_reward} gold.", 180)
+        # Drop items
+        drop_count = random.randint(self.enemy.drop_count_range[0], self.enemy.drop_count_range[1])
+        dropped_items = random.sample(self.enemy.drop_pool, min(drop_count, len(self.enemy.drop_pool)))
+        for item_id in dropped_items:
+            self._add_item_to_inventory(item_id)
+            item_name = items.get(item_id, {}).get("name", item_id)
+            self._message(f"Found {item_name}!", 180)
+        self.enemy = None
+        self.current_zone = None
+    
+    def _perform_player_attack(self, attack_id):
+        attack_data = attacks.get(attack_id)
+        if not attack_data:
+            return
+        current_cooldown = self.player.cooldowns.get(attack_id, 0)
+        if current_cooldown > 0:
+            self._message(f"{attack_data['name']} is on cooldown for {current_cooldown} more turn(s).", 150)
+            return
+        distance = math.hypot(self.player.x - self.enemy.x, self.player.y - self.enemy.y) / TILE_SIZE
+        if distance > attack_data.get("range", 1):
+            self._message(f"{attack_data['name']} is out of range.", 150)
+            return
+        damage = calculate_attack_damage(self.player, attack_data, distance)
+        # Apply zone modifier
+        if self.current_zone:
+            is_melee = attack_data.get("damage_type", "").lower() == "physical"
+            if self.current_zone == FRONT_ZONE:
+                damage *= 1.5 if is_melee else 0.5
+            elif self.current_zone == BACK_ZONE:
+                damage *= 0.5 if is_melee else 1.5
+        actual_damage, dodged = self.enemy.take_damage(damage)
+        self.player.cooldowns[attack_id] = attack_data.get("cooldown", 0) + 1
+        self._message(f"You use {attack_data['name']}!", 150)
+        if actual_damage > 0:
+            self._message(f"{self.enemy.name} takes {actual_damage:.0f} damage!", 150)
+        if dodged:
+            self._message(f"{self.enemy.name} dodged the attack!", 150)
+        if self.enemy.stats.current_hp <= 0:
+            self._handle_enemy_defeat()
     
     def update_battle(self):
         """Update battle state - movement and distance mechanics"""
@@ -4729,6 +5209,9 @@ class Game:
 
         if self.show_quest_log:
             self._draw_quest_log_overlay()
+
+        if self.show_menu:
+            self._draw_menu_overlay()
 
         if self.active_attack_cutscene:
             self._draw_attack_cutscene()
@@ -4804,6 +5287,10 @@ class Game:
         # Draw player
         self.player.draw(self.screen)
         
+        # Draw enemy if in combat
+        if self.in_combat and self.enemy:
+            self.enemy.draw(self.screen)
+        
         # Draw a compact exploration HUD with the important stats only.
         hud_x = 10
         hud_y = 10
@@ -4872,16 +5359,19 @@ class Game:
         # Draw instructions in a compact top-right HUD panel
         instructions = [
             "WASD/Arrows - Move",
-            "I - Open Inventory / Equipment",
-            "B - Open Bestiary",
-            "J - Open Quest Journal",
+            "M - Open Menu",
             "Use doors/exits to change maps",
             "Ctrl+S Save (Explore only)",
         ]
-        panel_width = 340
-        panel_height = 286
+        panel_width = 400
         panel_x = SCREEN_WIDTH - panel_width - 12
         panel_y = 8
+        base_section = 16 + len(instructions) * 26
+        faction_section = 28 + len(FACTIONS) * 24
+        message_section = max(0, len(self.messages[-4:]) * 28)
+        panel_height = max(360, base_section + faction_section + message_section + 24)
+        panel_height = min(panel_height, SCREEN_HEIGHT - 20)
+
         panel_surface = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
         panel_surface.fill((236, 233, 225, 160))
         self.screen.blit(panel_surface, (panel_x, panel_y))
@@ -4901,17 +5391,21 @@ class Game:
             color = faction_info["color"] if value >= 0 else (180, 82, 82)
             standing_text = self.font_small.render(f"{faction_info['name']}: {value:+d}", True, color)
             self.screen.blit(standing_text, (panel_x + 14, faction_y))
-            faction_y += 22
+            faction_y += 24
         alignment = self._alignment_label()
         alignment_text = self.font_small.render(f"Alignment: {alignment}", True, hud_muted)
         self.screen.blit(alignment_text, (panel_x + 14, faction_y + 2))
         faint_text = self.font_small.render(f"Faints Remembered: {self.faint_count}", True, hud_muted)
-        self.screen.blit(faint_text, (panel_x + 14, faction_y + 24))
-        
-        # Draw recent messages below the stat block so they don't cover the map center
-        msg_y = 250
+        self.screen.blit(faint_text, (panel_x + 14, faction_y + 28))
+        zone_text = self.font_small.render(f"Zone: {self.current_zone or 'None'}", True, hud_muted)
+        self.screen.blit(zone_text, (panel_x + 14, faction_y + 50))
+
+        # Draw recent messages inside the same HUD panel
+        msg_y = faction_y + 58
+        msg_x = panel_x + 14
+        msg_width = panel_width - 28
         for msg in self.messages[-4:]:
-            used_height = msg.draw(self.screen, self.font_small, msg_y, max_width=360)
+            used_height = msg.draw(self.screen, self.font_small, msg_y, x_offset=msg_x, max_width=msg_width)
             msg_y += used_height + 4
         self._draw_npc_dialogue()
         self._draw_shop()
@@ -5378,7 +5872,7 @@ class Game:
         root_map_index = self._map_index_by_id("root_home")
         if root_map_index is None:
             try:
-                with open("maps.json", "r") as f:
+                with open(json_file("maps.json"), "r") as f:
                     map_data = json.load(f)
                 loaded_maps = map_data.get("maps", [])
                 if loaded_maps:

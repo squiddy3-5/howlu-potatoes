@@ -2,7 +2,7 @@
   "npcs": [
     {
       "id": "merchant",
-      "name": "Merchant Yumi",
+      "name": "Merchant Ishiyama",
       "map_id": "starting_town",
       "grid_x": 5,
       "grid_y": 18,
